@@ -4,7 +4,6 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
-import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import java.util.ArrayList;
@@ -16,27 +15,21 @@ public final class ApiProbe {
     private ApiProbe() {
     }
 
-    public static List<String> run() {
+    public static List<String> run(Store<EntityStore> store, Ref<EntityStore> ref, PlayerRef playerRef) {
         List<String> out = new ArrayList<>(6);
         out.add("probe:");
-        out.add(s1());
-        out.add(s2());
-        out.add(s3());
-        out.add(s4());
+        out.add(s1(store, ref));
+        out.add(s2(playerRef));
+        out.add(s3(playerRef));
+        out.add(s4(playerRef));
         out.add(s5());
         return out;
     }
 
-    private static String s1() {
-        PlayerRef p = anyPlayer();
-        if (p == null) {
-            return "S1 view-radius: skip (no player)";
-        }
-        Ref<EntityStore> ref = p.getReference();
+    private static String s1(Store<EntityStore> store, Ref<EntityStore> ref) {
         if (ref == null) {
             return "S1 view-radius: fail (no entity ref)";
         }
-        Store<EntityStore> store = ref.getStore();
         Player player = store.getComponent(ref, Player.getComponentType());
         if (player == null) {
             return "S1 view-radius: fail (no Player component)";
@@ -46,9 +39,8 @@ public final class ApiProbe {
                 + " write=setClientViewRadius";
     }
 
-    private static String s2() {
-        PlayerRef p = anyPlayer();
-        if (p == null) {
+    private static String s2(PlayerRef p) {
+        if (p == null || !p.isValid()) {
             return "S2 position: skip (no player)";
         }
         if (p.getTransform() == null || p.getTransform().getPosition() == null) {
@@ -59,9 +51,8 @@ public final class ApiProbe {
                 pos.x, pos.y, pos.z, p.getWorldUuid());
     }
 
-    private static String s3() {
-        PlayerRef p = anyPlayer();
-        if (p == null) {
+    private static String s3(PlayerRef p) {
+        if (p == null || !p.isValid()) {
             return "S3 chunks: skip (no player)";
         }
         return p.getChunkTracker() == null
@@ -69,9 +60,8 @@ public final class ApiProbe {
                 : "S3 chunks: partial (tracker ok, no enumerate yet)";
     }
 
-    private static String s4() {
-        PlayerRef p = anyPlayer();
-        if (p == null) {
+    private static String s4(PlayerRef p) {
+        if (p == null || !p.isValid()) {
             return "S4 entities: skip (no player)";
         }
         return p.getReference() == null
@@ -83,12 +73,4 @@ public final class ApiProbe {
         return "S5 unload: pending (governor not wired)";
     }
 
-    private static PlayerRef anyPlayer() {
-        for (PlayerRef p : Universe.get().getPlayers()) {
-            if (p.isValid()) {
-                return p;
-            }
-        }
-        return null;
-    }
 }

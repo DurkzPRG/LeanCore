@@ -6,8 +6,14 @@ import com.durkz.leancore.probe.ApiProbe;
 import com.durkz.leancore.runtime.MemoryRuntime;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.command.system.basecommands.AbstractAsyncCommand;
+import com.hypixel.hytale.server.core.command.system.basecommands.AbstractPlayerCommand;
 import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
@@ -104,14 +110,15 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         }
     }
 
-    private static final class ProbeCmd extends CommandBase {
+    private static final class ProbeCmd extends AbstractPlayerCommand {
         ProbeCmd() {
             super("probe", "API capability check");
         }
 
         @Override
-        protected void executeSync(CommandContext ctx) {
-            for (String line : ApiProbe.run()) {
+        protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
+                               PlayerRef playerRef, World world) {
+            for (String line : ApiProbe.run(store, ref, playerRef)) {
                 say(ctx, line, "#AAAAAA");
             }
         }
