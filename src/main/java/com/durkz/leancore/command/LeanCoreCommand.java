@@ -68,6 +68,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                         + " | view " + String.format(Locale.ROOT, "%.0f%%", gov.policy().viewScale() * 100.0D), "#AAAAAA");
             }
             say(ctx, rt.learningStore().statusLine(), "#888888");
+            say(ctx, rt.learningStore().windowLine(), "#888888");
         }
     }
 

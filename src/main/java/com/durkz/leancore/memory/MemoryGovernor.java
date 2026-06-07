@@ -2,7 +2,9 @@ package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
+import com.durkz.leancore.intelligence.LearningStore;
 import com.durkz.leancore.intelligence.PlayerBehavior;
+import com.durkz.leancore.intelligence.RollbackMonitor;
 import com.durkz.leancore.session.SessionMode;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
@@ -17,6 +19,8 @@ public class MemoryGovernor {
     private final LeanCoreConfig config;
     private final RetentionAllocator allocator;
     private final PolicyApplier applier;
+    private final LearningStore learningStore;
+    private final RollbackMonitor rollbackMonitor;
 
     private GovernorPolicy activePolicy;
     private GovernorPolicy previousPolicy;
@@ -27,10 +31,17 @@ public class MemoryGovernor {
 
     private volatile GovernorStatus lastStatus = GovernorStatus.idle();
 
-    public MemoryGovernor(LeanCoreConfig config, RetentionAllocator allocator, PolicyApplier applier) {
+    public MemoryGovernor(
+            LeanCoreConfig config,
+            RetentionAllocator allocator,
+            PolicyApplier applier,
+            LearningStore learningStore
+    ) {
         this.config = config;
         this.allocator = allocator;
         this.applier = applier;
+        this.learningStore = learningStore;
+        this.rollbackMonitor = new RollbackMonitor(learningStore);
     }
 
     public void tick(
@@ -43,6 +54,9 @@ public class MemoryGovernor {
             lastStatus = GovernorStatus.idle();
             return;
         }
+
+        long nowMs = System.currentTimeMillis();
+        rollbackMonitor.tick(sample.heapUsedRatio(), nowMs);
 
         GovernorPreset preset = GovernorPreset.resolve(config.preset, mode);
         GovernorPolicy candidate = GovernorPolicy.forTier(preset, sample.tier());
@@ -58,10 +72,10 @@ public class MemoryGovernor {
         if (toApply != null) {
             Collection<PlayerRef> online = Universe.get().getPlayers();
             scheduled = applier.apply(toApply, online, behaviors);
-            commitPolicy(toApply, sample.heapUsedRatio());
+            commitPolicy(toApply, sample.heapUsedRatio(), nowMs);
         }
 
-        long since = lastChangeMs <= 0L ? 0L : (System.currentTimeMillis() - lastChangeMs) / 1000L;
+        long since = lastChangeMs <= 0L ? 0L : (nowMs - lastChangeMs) / 1000L;
         lastStatus = new GovernorStatus(
                 true,
                 preset,
@@ -93,6 +107,7 @@ public class MemoryGovernor {
         }
         GovernorPolicy failed = activePolicy;
         blacklistedUntilMs.put(failed.key(), System.currentTimeMillis() + 15 * 60_000L);
+        rollbackMonitor.onRollback(failed.key());
         activePolicy = previousPolicy;
         rolledBack = true;
         lastChangeMs = System.currentTimeMillis();
@@ -100,34 +115,42 @@ public class MemoryGovernor {
     }
 
     private GovernorPolicy choosePolicy(GovernorPolicy candidate) {
-        if (isBlacklisted(candidate)) {
+        if (isBlacklisted(candidate) || learningStore.isPolicyDeprioritized(candidate.key())) {
             return activePolicy;
         }
         if (activePolicy == null) {
             return candidate;
         }
         if (candidate.tier().ordinal() > activePolicy.tier().ordinal()) {
-            return candidate;
+            return preferHigherScore(activePolicy, candidate);
         }
         long elapsedSec = (System.currentTimeMillis() - lastChangeMs) / 1000L;
         if (!samePolicy(activePolicy, candidate) && elapsedSec >= config.policyChangeMinIntervalSec) {
-            return candidate;
+            return preferHigherScore(activePolicy, candidate);
         }
         if (allocator.lastFootprintMb() > allocator.lastBudgetMb()) {
-            return candidate;
+            return preferHigherScore(activePolicy, candidate);
         }
         return activePolicy;
     }
 
-    private void commitPolicy(GovernorPolicy toApply, double heapRatio) {
+    private GovernorPolicy preferHigherScore(GovernorPolicy current, GovernorPolicy candidate) {
+        if (learningStore.policyScore(candidate.key()) >= learningStore.policyScore(current.key())) {
+            return candidate;
+        }
+        return current;
+    }
+
+    private void commitPolicy(GovernorPolicy toApply, double heapRatio, long nowMs) {
         if (samePolicy(activePolicy, toApply)) {
             return;
         }
         previousPolicy = activePolicy;
         activePolicy = toApply;
-        lastChangeMs = System.currentTimeMillis();
+        lastChangeMs = nowMs;
         heapAtChange = heapRatio;
         rolledBack = false;
+        rollbackMonitor.onPolicyApplied(toApply.key(), heapRatio, nowMs);
     }
 
     private boolean isBlacklisted(GovernorPolicy policy) {

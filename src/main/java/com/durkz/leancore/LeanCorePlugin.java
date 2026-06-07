@@ -42,8 +42,8 @@ public class LeanCorePlugin extends JavaPlugin {
         super.setup();
 
         config = LeanCoreConfig.load(getDataDirectory());
-        BehaviorClassifier classifier = new BehaviorClassifier();
         LearningStore learning = new LearningStore(getDataDirectory(), config);
+        BehaviorClassifier classifier = new BehaviorClassifier(learning);
 
         getEventRegistry().registerGlobal(PlayerConnectEvent.class, e -> {
             if (e.getPlayerRef() != null) {

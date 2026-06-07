@@ -11,7 +11,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class BehaviorClassifier {
 
+    private final LearningStore learningStore;
     private final Map<UUID, PlayerMemoryProfile> profiles = new ConcurrentHashMap<>();
+
+    public BehaviorClassifier(LearningStore learningStore) {
+        this.learningStore = learningStore;
+    }
 
     public PlayerMemoryProfile profileFor(PlayerRef ref) {
         return profiles.computeIfAbsent(ref.getUuid(), PlayerMemoryProfile::new);
@@ -50,7 +55,7 @@ public class BehaviorClassifier {
         long now = System.currentTimeMillis();
         Map<UUID, PlayerBehavior> out = new HashMap<>(profiles.size());
         for (Map.Entry<UUID, PlayerMemoryProfile> e : profiles.entrySet()) {
-            out.put(e.getKey(), e.getValue().classify(now));
+            out.put(e.getKey(), e.getValue().classify(now, learningStore.behaviorWeights()));
         }
         return out;
     }

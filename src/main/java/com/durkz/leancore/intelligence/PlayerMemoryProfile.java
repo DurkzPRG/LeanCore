@@ -4,14 +4,6 @@ import java.util.UUID;
 
 public class PlayerMemoryProfile {
 
-    private static final long AFK_IDLE_SEC = 120L;
-    private static final int BUILD_BLOCK_MIN = 8;
-    private static final double EXPLORER_DIST = 200.0D;
-    private static final int EXPLORER_ZONES = 2;
-    private static final int FIGHTER_BREAKS = 12;
-    private static final double FIGHTER_MAX_DIST = 80.0D;
-    private static final double SOCIAL_MAX_DIST = 20.0D;
-
     private final UUID playerId;
 
     private int blocksBroken;
@@ -62,22 +54,21 @@ public class PlayerMemoryProfile {
         lastActivityMs = System.currentTimeMillis();
     }
 
-    // Hand-tuned rules for v0.1 telemetry. v0.3 replaces this with learned weights from LearningStore.
-    public PlayerBehavior classify(long nowMs) {
+    public PlayerBehavior classify(long nowMs, BehaviorWeights weights) {
         long idleSec = (nowMs - lastActivityMs) / 1000L;
-        if (idleSec >= AFK_IDLE_SEC) {
+        if (idleSec >= weights.afkIdleSec()) {
             return PlayerBehavior.AFK;
         }
-        if (blocksPlaced + blocksBroken >= BUILD_BLOCK_MIN && blocksPlaced >= blocksBroken) {
+        if (blocksPlaced + blocksBroken >= weights.buildBlockMin() && blocksPlaced >= blocksBroken) {
             return PlayerBehavior.BUILDER;
         }
-        if (zonesDiscovered >= EXPLORER_ZONES && distanceMoved >= EXPLORER_DIST) {
+        if (zonesDiscovered >= weights.explorerZones() && distanceMoved >= weights.explorerDist()) {
             return PlayerBehavior.EXPLORER;
         }
-        if (blocksBroken >= FIGHTER_BREAKS && distanceMoved < FIGHTER_MAX_DIST) {
+        if (blocksBroken >= weights.fighterBreaks() && distanceMoved < weights.fighterMaxDist()) {
             return PlayerBehavior.FIGHTER;
         }
-        if (distanceMoved < SOCIAL_MAX_DIST && blocksBroken + blocksPlaced < 3) {
+        if (distanceMoved < weights.socialMaxDist() && blocksBroken + blocksPlaced < 3) {
             return PlayerBehavior.SOCIAL;
         }
         return PlayerBehavior.UNKNOWN;

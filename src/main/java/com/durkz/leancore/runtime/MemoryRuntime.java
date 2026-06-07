@@ -64,7 +64,7 @@ public class MemoryRuntime {
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         RetentionAllocator allocator = new RetentionAllocator(config);
         PolicyApplier applier = new PolicyApplier(config);
-        MemoryGovernor governor = new MemoryGovernor(config, allocator, applier);
+        MemoryGovernor governor = new MemoryGovernor(config, allocator, applier, learningStore);
         return new MemoryRuntime(
                 plugin,
                 config,
@@ -125,6 +125,7 @@ public class MemoryRuntime {
         lastMode = sessionDetector.detect(sample.onlinePlayers());
 
         var behaviors = classifier.snapshotBehaviors();
+        learningStore.noteHeap(sample.heapUsedRatio());
         learningStore.noteTier(sample.tier());
         learningStore.noteBehaviors(behaviors);
         governor.tick(sample, lastMode, behaviors, dormancyMap);
