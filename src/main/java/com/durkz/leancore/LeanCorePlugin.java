@@ -53,10 +53,14 @@ public class LeanCorePlugin extends JavaPlugin {
         getEventRegistry().registerGlobal(PlayerDisconnectEvent.class, e -> {
             if (e.getPlayerRef() != null) {
                 classifier.forget(e.getPlayerRef().getUuid());
+                classifier.syncToStore(learning);
                 learning.flush();
             }
         });
-        getEventRegistry().registerGlobal(ShutdownEvent.class, e -> learning.flush());
+        getEventRegistry().registerGlobal(ShutdownEvent.class, e -> {
+            classifier.syncToStore(learning);
+            learning.flush();
+        });
 
         BehaviorSignalSystems.register(getEntityStoreRegistry(), classifier);
         getCommandRegistry().registerCommand(new LeanCoreCommand());

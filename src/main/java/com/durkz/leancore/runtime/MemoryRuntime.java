@@ -95,7 +95,7 @@ public class MemoryRuntime {
         if (config.persistIntervalSeconds > 0) {
             ticker.scheduleAtFixedRate(() -> {
                 try {
-                    learningStore.flush();
+                    persistLearning();
                 } catch (Exception e) {
                     plugin.getLogger().atWarning().withCause(e).log("learning flush failed");
                 }
@@ -107,28 +107,34 @@ public class MemoryRuntime {
         if (ticker == null) {
             return;
         }
-        learningStore.flush();
+        persistLearning();
         ticker.shutdownNow();
         ticker = null;
+    }
+
+    private void persistLearning() {
+        classifier.syncToStore(learningStore);
+        learningStore.flush();
     }
 
     private void tick() {
         if (!config.enabled) {
             return;
         }
+        long nowMs = System.currentTimeMillis();
         var online = Universe.get().getPlayers();
-        classifier.samplePositions(online);
+        classifier.samplePositions(online, nowMs);
         dormancyMap.refreshFromPlayers();
 
         MemorySnapshot sample = sensor.sample();
         lastSample = sample;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
 
-        var behaviors = classifier.snapshotBehaviors();
+        var demands = classifier.snapshotDemands(nowMs);
         learningStore.noteHeap(sample.heapUsedRatio());
         learningStore.noteTier(sample.tier());
-        learningStore.noteBehaviors(behaviors);
-        governor.tick(sample, lastMode, behaviors, dormancyMap);
+        learningStore.noteDemands(demands);
+        governor.tick(sample, lastMode, demands, dormancyMap);
     }
 
     public MemorySnapshot lastSample() {
@@ -146,6 +152,10 @@ public class MemoryRuntime {
 
     public LearningStore learningStore() {
         return learningStore;
+    }
+
+    public BehaviorClassifier classifier() {
+        return classifier;
     }
 
     public GovernorStatus governorStatus() {

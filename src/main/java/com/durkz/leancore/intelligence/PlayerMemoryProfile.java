@@ -4,6 +4,14 @@ import java.util.UUID;
 
 public class PlayerMemoryProfile {
 
+    private static final long AFK_IDLE_SEC = 120L;
+    private static final int BUILD_BLOCK_MIN = 8;
+    private static final double EXPLORER_DIST = 200.0D;
+    private static final int EXPLORER_ZONES = 2;
+    private static final int FIGHTER_BREAKS = 12;
+    private static final double FIGHTER_MAX_DIST = 80.0D;
+    private static final double SOCIAL_MAX_DIST = 20.0D;
+
     private final UUID playerId;
 
     private int blocksBroken;
@@ -54,21 +62,22 @@ public class PlayerMemoryProfile {
         lastActivityMs = System.currentTimeMillis();
     }
 
-    public PlayerBehavior classify(long nowMs, BehaviorWeights weights) {
+    // Debug label only — retention and view radius use RetentionDemand instead.
+    public PlayerBehavior classify(long nowMs) {
         long idleSec = (nowMs - lastActivityMs) / 1000L;
-        if (idleSec >= weights.afkIdleSec()) {
+        if (idleSec >= AFK_IDLE_SEC) {
             return PlayerBehavior.AFK;
         }
-        if (blocksPlaced + blocksBroken >= weights.buildBlockMin() && blocksPlaced >= blocksBroken) {
+        if (blocksPlaced + blocksBroken >= BUILD_BLOCK_MIN && blocksPlaced >= blocksBroken) {
             return PlayerBehavior.BUILDER;
         }
-        if (zonesDiscovered >= weights.explorerZones() && distanceMoved >= weights.explorerDist()) {
+        if (zonesDiscovered >= EXPLORER_ZONES && distanceMoved >= EXPLORER_DIST) {
             return PlayerBehavior.EXPLORER;
         }
-        if (blocksBroken >= weights.fighterBreaks() && distanceMoved < weights.fighterMaxDist()) {
+        if (blocksBroken >= FIGHTER_BREAKS && distanceMoved < FIGHTER_MAX_DIST) {
             return PlayerBehavior.FIGHTER;
         }
-        if (distanceMoved < weights.socialMaxDist() && blocksBroken + blocksPlaced < 3) {
+        if (distanceMoved < SOCIAL_MAX_DIST && blocksBroken + blocksPlaced < 3) {
             return PlayerBehavior.SOCIAL;
         }
         return PlayerBehavior.UNKNOWN;

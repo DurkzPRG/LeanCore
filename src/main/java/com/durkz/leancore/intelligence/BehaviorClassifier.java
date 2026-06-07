@@ -1,6 +1,5 @@
 package com.durkz.leancore.intelligence;
 
-import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 
 import java.util.Collection;
@@ -11,52 +10,76 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class BehaviorClassifier {
 
-    private final LearningStore learningStore;
-    private final Map<UUID, PlayerMemoryProfile> profiles = new ConcurrentHashMap<>();
+    private final PlayerFeatureTracker features;
+    private final RetentionDemandEstimator estimator = new RetentionDemandEstimator();
+    private final Map<UUID, PlayerMemoryProfile> debugProfiles = new ConcurrentHashMap<>();
 
     public BehaviorClassifier(LearningStore learningStore) {
-        this.learningStore = learningStore;
+        this.features = new PlayerFeatureTracker(learningStore);
     }
 
-    public PlayerMemoryProfile profileFor(PlayerRef ref) {
-        return profiles.computeIfAbsent(ref.getUuid(), PlayerMemoryProfile::new);
+    public PlayerFeatureTracker features() {
+        return features;
+    }
+
+    public void profileFor(PlayerRef ref) {
+        features.stateFor(ref);
+        debugProfiles.computeIfAbsent(ref.getUuid(), PlayerMemoryProfile::new);
     }
 
     public void forget(UUID playerId) {
-        profiles.remove(playerId);
+        features.forget(playerId);
+        debugProfiles.remove(playerId);
     }
 
     public void onBlockBroken(PlayerRef ref) {
-        profileFor(ref).blockBroken();
+        features.onBlockBroken(ref);
+        debugProfile(ref).blockBroken();
     }
 
     public void onBlockPlaced(PlayerRef ref) {
-        profileFor(ref).blockPlaced();
+        features.onBlockPlaced(ref);
+        debugProfile(ref).blockPlaced();
     }
 
     public void onZoneDiscovered(PlayerRef ref) {
-        profileFor(ref).zoneDiscovered();
+        features.onZoneDiscovered(ref);
+        debugProfile(ref).zoneDiscovered();
     }
 
-    public void samplePositions(Collection<PlayerRef> online) {
+    public void samplePositions(Collection<PlayerRef> online, long nowMs) {
+        features.samplePositions(online, nowMs);
         for (PlayerRef ref : online) {
             if (!ref.isValid()) {
                 continue;
             }
-            Transform t = ref.getTransform();
+            var t = ref.getTransform();
             if (t == null || t.getPosition() == null) {
                 continue;
             }
-            profileFor(ref).samplePosition(t.getPosition().x, t.getPosition().z);
+            debugProfile(ref).samplePosition(t.getPosition().x, t.getPosition().z);
         }
     }
 
-    public Map<UUID, PlayerBehavior> snapshotBehaviors() {
-        long now = System.currentTimeMillis();
-        Map<UUID, PlayerBehavior> out = new HashMap<>(profiles.size());
-        for (Map.Entry<UUID, PlayerMemoryProfile> e : profiles.entrySet()) {
-            out.put(e.getKey(), e.getValue().classify(now, learningStore.behaviorWeights()));
+    public Map<UUID, PlayerBehavior> snapshotBehaviors(long nowMs) {
+        Map<UUID, PlayerBehavior> out = new HashMap<>(debugProfiles.size());
+        for (Map.Entry<UUID, PlayerMemoryProfile> e : debugProfiles.entrySet()) {
+            out.put(e.getKey(), e.getValue().classify(nowMs));
         }
         return out;
+    }
+
+    public Map<UUID, RetentionDemand> snapshotDemands(long nowMs) {
+        return estimator.estimate(features.snapshot(), snapshotBehaviors(nowMs), nowMs);
+    }
+
+    public void syncToStore(LearningStore store) {
+        for (PlayerFeatureState state : features.snapshot().values()) {
+            store.savePlayerFeatures(state);
+        }
+    }
+
+    private PlayerMemoryProfile debugProfile(PlayerRef ref) {
+        return debugProfiles.computeIfAbsent(ref.getUuid(), PlayerMemoryProfile::new);
     }
 }

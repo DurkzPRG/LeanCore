@@ -3,7 +3,7 @@ package com.durkz.leancore.memory;
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.LearningStore;
-import com.durkz.leancore.intelligence.PlayerBehavior;
+import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.intelligence.RollbackMonitor;
 import com.durkz.leancore.session.SessionMode;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -47,7 +47,7 @@ public class MemoryGovernor {
     public void tick(
             MemorySnapshot sample,
             SessionMode mode,
-            Map<UUID, PlayerBehavior> behaviors,
+            Map<UUID, RetentionDemand> demands,
             ZoneDormancyMap dormancyMap
     ) {
         if (!config.enabled || !config.governEnabled) {
@@ -62,7 +62,7 @@ public class MemoryGovernor {
         GovernorPolicy candidate = GovernorPolicy.forTier(preset, sample.tier());
         checkRollback(sample);
 
-        allocator.reconcile(preset, mode, sample, behaviors, dormancyMap);
+        allocator.reconcile(preset, mode, sample, demands, dormancyMap);
         if (candidate.demoteBatch() > 0) {
             dormancyMap.demoteFarthestDormant(candidate.demoteBatch());
         }
@@ -71,7 +71,7 @@ public class MemoryGovernor {
         int scheduled = 0;
         if (toApply != null) {
             Collection<PlayerRef> online = Universe.get().getPlayers();
-            scheduled = applier.apply(toApply, online, behaviors);
+            scheduled = applier.apply(toApply, online, demands);
             commitPolicy(toApply, sample.heapUsedRatio(), nowMs);
         }
 

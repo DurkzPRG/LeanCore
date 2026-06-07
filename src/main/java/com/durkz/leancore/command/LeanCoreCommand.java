@@ -2,6 +2,8 @@ package com.durkz.leancore.command;
 
 import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.dormancy.ZoneState;
+import com.durkz.leancore.intelligence.PlayerFeatureState;
+import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.probe.ApiProbe;
 import com.durkz.leancore.runtime.MemoryRuntime;
 import com.hypixel.hytale.server.core.Message;
@@ -26,6 +28,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         addSubCommand(new MemoryCmd());
         addSubCommand(new ZonesCmd());
         addSubCommand(new ProbeCmd());
+        addSubCommand(new LearnCmd());
     }
 
     @Override
@@ -122,6 +125,65 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             for (String line : map.topZones(6)) {
                 say(ctx, line, "#AAAAAA");
             }
+        }
+    }
+
+    private static final class LearnCmd extends CommandBase {
+        LearnCmd() {
+            super("learn", "Learning diagnostics");
+            addSubCommand(new LearnPlayerCmd());
+        }
+
+        @Override
+        protected void executeSync(CommandContext ctx) {
+            MemoryRuntime rt = runtime(ctx);
+            if (rt == null) {
+                return;
+            }
+            say(ctx, rt.learningStore().statusLine(), "#FFAA00");
+            say(ctx, rt.learningStore().windowLine(), "#888888");
+            say(ctx, "retention uses demand scores; behavior labels are debug only", "#888888");
+        }
+    }
+
+    private static final class LearnPlayerCmd extends AbstractPlayerCommand {
+        LearnPlayerCmd() {
+            super("player", "Your demand and feature snapshot");
+        }
+
+        @Override
+        protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
+                               PlayerRef playerRef, World world) {
+            MemoryRuntime rt = runtime(ctx);
+            if (rt == null) {
+                return;
+            }
+            long nowMs = System.currentTimeMillis();
+            var demands = rt.classifier().snapshotDemands(nowMs);
+            RetentionDemand demand = demands.getOrDefault(
+                    playerRef.getUuid(),
+                    rt.learningStore().demandFor(playerRef.getUuid())
+            );
+            PlayerFeatureState features = rt.classifier().features().snapshot().get(playerRef.getUuid());
+            say(ctx, String.format(Locale.ROOT,
+                    "demand=%.2f confidence=%.2f retention=%d MB viewScale=%.2f label=%s",
+                    demand.demand(),
+                    demand.confidence(),
+                    demand.retentionMb(),
+                    demand.viewScale(),
+                    demand.debugLabel()), "#FFAA00");
+            if (features == null) {
+                say(ctx, "no live features yet", "#888888");
+                return;
+            }
+            say(ctx, String.format(Locale.ROOT,
+                    "features move60=%.1f break60=%.1f place60=%.1f zone60=%.1f idle=%ds observed=%ds",
+                    features.emaMovement60(),
+                    features.emaBreaks60(),
+                    features.emaPlaces60(),
+                    features.emaZones60(),
+                    features.idleSec(nowMs),
+                    features.observedSec()), "#AAAAAA");
         }
     }
 

@@ -2,6 +2,7 @@ package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.intelligence.PlayerBehavior;
+import com.durkz.leancore.intelligence.RetentionDemand;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
@@ -22,7 +23,7 @@ public class PolicyApplier {
         this.config = config;
     }
 
-    public int apply(GovernorPolicy policy, Collection<PlayerRef> online, Map<UUID, PlayerBehavior> behaviors) {
+    public int apply(GovernorPolicy policy, Collection<PlayerRef> online, Map<UUID, RetentionDemand> demands) {
         if (policy == null) {
             return 0;
         }
@@ -39,14 +40,17 @@ public class PolicyApplier {
             if (world == null || !world.isAlive()) {
                 continue;
             }
-            PlayerBehavior behavior = behaviors.getOrDefault(playerRef.getUuid(), PlayerBehavior.UNKNOWN);
-            world.execute(() -> applyOne(playerRef, policy, behavior));
+            RetentionDemand demand = demands.getOrDefault(
+                    playerRef.getUuid(),
+                    RetentionDemand.coldStart(PlayerBehavior.UNKNOWN)
+            );
+            world.execute(() -> applyOne(playerRef, policy, demand));
             scheduled++;
         }
         return scheduled;
     }
 
-    private void applyOne(PlayerRef playerRef, GovernorPolicy policy, PlayerBehavior behavior) {
+    private void applyOne(PlayerRef playerRef, GovernorPolicy policy, RetentionDemand demand) {
         Ref<EntityStore> ref = playerRef.getReference();
         if (ref == null) {
             return;
@@ -56,23 +60,15 @@ public class PolicyApplier {
         if (player == null) {
             return;
         }
-        int target = targetRadius(player, policy, behavior);
+        int target = targetRadius(player, policy, demand);
         if (player.getClientViewRadius() != target) {
             player.setClientViewRadius(target);
         }
     }
 
-    private int targetRadius(Player player, GovernorPolicy policy, PlayerBehavior behavior) {
+    private int targetRadius(Player player, GovernorPolicy policy, RetentionDemand demand) {
         int serverRadius = Math.max(1, player.getViewRadius());
-        double behaviorScale = switch (behavior) {
-            case AFK -> 0.75D;
-            case EXPLORER -> 1.05D;
-            case BUILDER -> 1.0D;
-            case FIGHTER -> 0.95D;
-            case SOCIAL -> 0.90D;
-            case UNKNOWN -> 1.0D;
-        };
-        int scaled = (int) Math.round(serverRadius * policy.viewScale() * behaviorScale);
+        int scaled = (int) Math.round(serverRadius * policy.viewScale() * demand.viewScale());
         return clamp(scaled, config.minClientViewRadius, config.maxClientViewRadius);
     }
 
