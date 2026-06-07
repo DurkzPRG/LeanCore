@@ -6,6 +6,7 @@ import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.intelligence.PlayerBehavior;
 import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.intelligence.RetentionDemandEstimator;
+import com.durkz.leancore.intelligence.ViewRadiusCache;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
@@ -22,10 +23,12 @@ public class PolicyApplier {
 
     private final LeanCoreConfig config;
     private final FalseCutTracker falseCutTracker;
+    private final ViewRadiusCache viewRadiusCache;
 
-    public PolicyApplier(LeanCoreConfig config, FalseCutTracker falseCutTracker) {
+    public PolicyApplier(LeanCoreConfig config, FalseCutTracker falseCutTracker, ViewRadiusCache viewRadiusCache) {
         this.config = config;
         this.falseCutTracker = falseCutTracker;
+        this.viewRadiusCache = viewRadiusCache;
     }
 
     public int apply(GovernorPolicy policy, Collection<PlayerRef> online, Map<UUID, RetentionDemand> demands) {
@@ -66,6 +69,9 @@ public class PolicyApplier {
             return;
         }
         UUID playerId = playerRef.getUuid();
+        if (viewRadiusCache != null) {
+            viewRadiusCache.noteViewRadius(playerId, player.getViewRadius(), player.getClientViewRadius());
+        }
         int current = player.getClientViewRadius();
         int target = targetRadius(player, policy, demand);
         if (HoldoutSet.isHoldout(playerId) && target < current) {

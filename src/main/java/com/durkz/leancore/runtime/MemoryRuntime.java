@@ -63,7 +63,7 @@ public class MemoryRuntime {
         MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext());
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         RetentionAllocator allocator = new RetentionAllocator(config);
-        PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker());
+        PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker(), classifier.features());
         MemoryGovernor governor = new MemoryGovernor(config, allocator, applier, learningStore);
         return new MemoryRuntime(
                 plugin,

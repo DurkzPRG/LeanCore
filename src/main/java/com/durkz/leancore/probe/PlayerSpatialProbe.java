@@ -50,8 +50,12 @@ public final class PlayerSpatialProbe {
             return new SpatialSample(0, 0, 0);
         }
 
-        public double chunkPressure() {
+        public double rawPressure() {
             return loadedChunks + loadingChunks * 0.5D;
+        }
+
+        public double normalizedPressure(int viewRadius, int previousLoaded) {
+            return ChunkPressureModel.normalize(loadedChunks, loadingChunks, viewRadius, previousLoaded);
         }
     }
 }

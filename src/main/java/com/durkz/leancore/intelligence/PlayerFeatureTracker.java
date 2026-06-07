@@ -9,9 +9,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class PlayerFeatureTracker {
-
-    private static final long SPATIAL_SAMPLE_INTERVAL_MS = 5_000L;
+public class PlayerFeatureTracker implements ViewRadiusCache {
 
     private final LearningStore learningStore;
     private final Map<UUID, PlayerFeatureState> states = new ConcurrentHashMap<>();
@@ -48,12 +46,20 @@ public class PlayerFeatureTracker {
         stateFor(ref).onZoneDiscovered();
     }
 
+    @Override
+    public void noteViewRadius(UUID playerId, int serverRadius, int clientRadius) {
+        PlayerFeatureState state = states.get(playerId);
+        if (state != null) {
+            state.noteViewRadius(serverRadius, clientRadius);
+        }
+    }
+
     public void samplePositions(Collection<PlayerRef> online, long nowMs) {
         for (PlayerFeatureState state : states.values()) {
             state.tick(nowMs);
         }
         boolean sampleSpatial = lastSpatialSampleMs <= 0L
-                || nowMs - lastSpatialSampleMs >= SPATIAL_SAMPLE_INTERVAL_MS;
+                || nowMs - lastSpatialSampleMs >= PlayerFeatureState.SPATIAL_SAMPLE_INTERVAL_MS;
         if (sampleSpatial) {
             lastSpatialSampleMs = nowMs;
         }
@@ -68,7 +74,10 @@ public class PlayerFeatureTracker {
             PlayerFeatureState state = stateFor(ref);
             state.samplePosition(t.getPosition().x, t.getPosition().z);
             if (sampleSpatial) {
-                state.sampleSpatial(PlayerSpatialProbe.readChunks(ref).chunkPressure());
+                PlayerSpatialProbe.SpatialSample sample = PlayerSpatialProbe.readChunks(ref);
+                double pressure = sample.normalizedPressure(state.cachedViewRadius(), state.lastRawLoaded());
+                state.noteRawLoaded(sample.loadedChunks());
+                state.sampleSpatial(pressure);
             }
         }
     }

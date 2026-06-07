@@ -1,5 +1,7 @@
 package com.durkz.leancore.intelligence;
 
+import com.durkz.leancore.probe.ChunkPressureModel;
+
 import java.util.UUID;
 
 public class PlayerFeatureState {
@@ -7,9 +9,11 @@ public class PlayerFeatureState {
     static final double SIGNIFICANT_MOVE_BLOCKS = 2.0D;
     static final long HALF_LIFE_60S_MS = 60_000L;
     static final long HALF_LIFE_15M_MS = 15 * 60_000L;
-    private static final double CHUNK_BLEND_60 = 1.0D - Math.exp(-Math.log(2.0D) * 1000.0D / HALF_LIFE_60S_MS);
-    private static final double CHUNK_BLEND_15M = 1.0D - Math.exp(-Math.log(2.0D) * 1000.0D / HALF_LIFE_15M_MS);
-    private static final double MAX_SANE_CHUNK_EMA = 512.0D;
+    static final long SPATIAL_SAMPLE_INTERVAL_MS = 5_000L;
+    private static final double CHUNK_BLEND_60 = blend(SPATIAL_SAMPLE_INTERVAL_MS, HALF_LIFE_60S_MS);
+    private static final double CHUNK_BLEND_15M = blend(SPATIAL_SAMPLE_INTERVAL_MS, HALF_LIFE_15M_MS);
+    private static final double MAX_SANE_CHUNK_EMA = 256.0D;
+    private static final int DEFAULT_VIEW_RADIUS = 16;
 
     private final UUID playerId;
 
@@ -32,6 +36,9 @@ public class PlayerFeatureState {
     private double lastX;
     private double lastZ;
     private boolean positioned;
+
+    private int cachedViewRadius = DEFAULT_VIEW_RADIUS;
+    private int lastRawLoaded = -1;
 
     public PlayerFeatureState(UUID playerId) {
         this.playerId = playerId;
@@ -89,12 +96,32 @@ public class PlayerFeatureState {
         touch();
     }
 
+    public void noteViewRadius(int serverRadius, int clientRadius) {
+        int radius = Math.max(serverRadius, clientRadius);
+        if (radius > 0) {
+            cachedViewRadius = radius;
+        }
+    }
+
+    public int cachedViewRadius() {
+        return cachedViewRadius;
+    }
+
+    public int lastRawLoaded() {
+        return lastRawLoaded;
+    }
+
+    public void noteRawLoaded(int loaded) {
+        lastRawLoaded = Math.max(0, loaded);
+    }
+
     public void sampleSpatial(double chunkPressure) {
         if (chunkPressure <= 0.0D) {
             return;
         }
-        emaChunks60 = emaChunks60 * (1.0D - CHUNK_BLEND_60) + chunkPressure * CHUNK_BLEND_60;
-        emaChunks15m = emaChunks15m * (1.0D - CHUNK_BLEND_15M) + chunkPressure * CHUNK_BLEND_15M;
+        double capped = Math.min(ChunkPressureModel.MAX_PRESSURE, chunkPressure);
+        emaChunks60 = emaChunks60 * (1.0D - CHUNK_BLEND_60) + capped * CHUNK_BLEND_60;
+        emaChunks15m = emaChunks15m * (1.0D - CHUNK_BLEND_15M) + capped * CHUNK_BLEND_15M;
     }
 
     public void samplePosition(double x, double z) {
@@ -213,5 +240,9 @@ public class PlayerFeatureState {
             return 0.0D;
         }
         return Math.min(value, MAX_SANE_CHUNK_EMA);
+    }
+
+    private static double blend(long sampleIntervalMs, long halfLifeMs) {
+        return 1.0D - Math.exp(-Math.log(2.0D) * sampleIntervalMs / halfLifeMs);
     }
 }

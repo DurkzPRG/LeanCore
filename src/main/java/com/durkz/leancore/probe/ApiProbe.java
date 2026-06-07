@@ -20,7 +20,7 @@ public final class ApiProbe {
         out.add("probe:");
         out.add(s1(store, ref));
         out.add(s2(playerRef));
-        out.add(s3(playerRef));
+        out.add(s3(store, ref, playerRef));
         out.add(s4(playerRef));
         out.add(s5());
         return out;
@@ -51,7 +51,7 @@ public final class ApiProbe {
                 pos.x, pos.y, pos.z, p.getWorldUuid());
     }
 
-    private static String s3(PlayerRef p) {
+    private static String s3(Store<EntityStore> store, Ref<EntityStore> ref, PlayerRef p) {
         if (p == null || !p.isValid()) {
             return "S3 chunks: skip (no player)";
         }
@@ -59,9 +59,21 @@ public final class ApiProbe {
         if (p.getChunkTracker() == null) {
             return "S3 chunks: fail (no ChunkTracker)";
         }
+        int viewRadius = 16;
+        Player player = ref != null ? store.getComponent(ref, Player.getComponentType()) : null;
+        if (player != null) {
+            viewRadius = Math.max(player.getViewRadius(), player.getClientViewRadius());
+        }
+        int budget = ChunkPressureModel.viewChunkBudget(viewRadius);
+        double normalized = sample.normalizedPressure(viewRadius, -1);
         return String.format(Locale.ROOT,
-                "S3 chunks: ok loaded=%d loading=%d pressure=%.1f",
-                sample.loadedChunks(), sample.loadingChunks(), sample.chunkPressure());
+                "S3 chunks: ok loaded=%d loading=%d raw=%.0f norm=%.1f view=%d budget=%d",
+                sample.loadedChunks(),
+                sample.loadingChunks(),
+                sample.rawPressure(),
+                normalized,
+                viewRadius,
+                budget);
     }
 
     private static String s4(PlayerRef p) {
