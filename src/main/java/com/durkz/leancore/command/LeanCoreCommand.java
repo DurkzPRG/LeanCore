@@ -72,6 +72,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             }
             say(ctx, rt.learningStore().statusLine(), "#888888");
             say(ctx, rt.learningStore().windowLine(), "#888888");
+            say(ctx, rt.learningStore().serverLine(), "#888888");
         }
     }
 
@@ -142,6 +143,8 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             }
             say(ctx, rt.learningStore().statusLine(), "#FFAA00");
             say(ctx, rt.learningStore().windowLine(), "#888888");
+            say(ctx, rt.learningStore().serverLine(), "#888888");
+            say(ctx, rt.learningStore().policyBandit().topArmLine(), "#AAAAAA");
             say(ctx, "retention uses demand scores; behavior labels are debug only", "#888888");
         }
     }

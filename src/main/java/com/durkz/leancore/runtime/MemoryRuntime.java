@@ -60,7 +60,7 @@ public class MemoryRuntime {
             BehaviorClassifier classifier,
             LearningStore learningStore
     ) {
-        MemoryPressureSensor sensor = new MemoryPressureSensor(config);
+        MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext());
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         RetentionAllocator allocator = new RetentionAllocator(config);
         PolicyApplier applier = new PolicyApplier(config);

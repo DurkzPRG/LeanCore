@@ -1,6 +1,5 @@
 package com.durkz.leancore.memory;
 
-import com.durkz.leancore.config.LeanCoreConfig;
 import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
@@ -11,11 +10,10 @@ import java.util.List;
 
 public class MemoryPressureSensor {
 
-    private final LeanCoreConfig config;
-    private MemoryTier lastTier = MemoryTier.COMFORT;
+    private final ServerContextTracker serverContext;
 
-    public MemoryPressureSensor(LeanCoreConfig config) {
-        this.config = config;
+    public MemoryPressureSensor(ServerContextTracker serverContext) {
+        this.serverContext = serverContext;
     }
 
     public MemorySnapshot sample() {
@@ -24,32 +22,14 @@ public class MemoryPressureSensor {
         long max = rt.maxMemory();
         double ratio = max <= 0L ? 0.0D : (double) used / max;
 
+        long nowMs = System.currentTimeMillis();
+        serverContext.observe(ratio, nowMs);
+
         Collection<PlayerRef> players = Universe.get().getPlayers();
-        MemoryTier tier = resolveTier(ratio);
+        MemoryTier tier = serverContext.resolveTier(ratio);
         return new MemorySnapshot(used, max, ratio, players.size(), maxPairwiseSpread(players), tier);
     }
 
-    private MemoryTier resolveTier(double ratio) {
-        MemoryTier next;
-        if (ratio >= config.criticalHeapRatio) {
-            next = MemoryTier.CRITICAL;
-        } else if (ratio >= config.tightHeapRatio) {
-            next = MemoryTier.TIGHT;
-        } else if (ratio >= config.watchHeapRatio) {
-            next = MemoryTier.WATCH;
-        } else {
-            next = MemoryTier.COMFORT;
-        }
-
-        // Step down one tier per tick so a single GC pause does not yo-yo the governor.
-        if (next.ordinal() < lastTier.ordinal()) {
-            next = MemoryTier.values()[lastTier.ordinal() - 1];
-        }
-        lastTier = next;
-        return next;
-    }
-
-    // O(n^2) but n is tiny on the hosts we care about; spread drives per-player footprint caps in v0.2.
     private static double maxPairwiseSpread(Collection<PlayerRef> players) {
         if (players.size() < 2) {
             return 0.0D;

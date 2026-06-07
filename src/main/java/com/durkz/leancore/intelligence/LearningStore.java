@@ -2,6 +2,7 @@ package com.durkz.leancore.intelligence;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.memory.MemoryTier;
+import com.durkz.leancore.memory.ServerContextTracker;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,30 +18,39 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class LearningStore {
 
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;
     private static final String STATE_FILE = "learning.state";
-
-    private static final double MIN_POLICY_SCORE = 0.1D;
-    private static final double MAX_POLICY_SCORE = 2.0D;
-    private static final double REINFORCE_DELTA = 0.1D;
-    private static final double PENALIZE_DELTA = 0.25D;
-    private static final double DEPRIORITIZE_SCORE = 0.35D;
 
     private final Path dataDir;
     private final LeanCoreConfig config;
-    private final Map<String, Double> policyScores = new ConcurrentHashMap<>();
     private final Map<UUID, PersistedPlayer> players = new ConcurrentHashMap<>();
     private final RollingHeapTracker heapWindows = new RollingHeapTracker();
+    private final ServerContextTracker serverContext;
+    private final PolicyBandit policyBandit;
+    private final OutcomeTracker outcomeTracker;
 
     private MemoryTier lastTier = MemoryTier.COMFORT;
     private int flushCount;
-    private int reinforceCount;
-    private int penalizeCount;
 
     public LearningStore(Path dataDir, LeanCoreConfig config) {
         this.dataDir = dataDir;
         this.config = config;
+        this.serverContext = new ServerContextTracker(config);
+        this.policyBandit = new PolicyBandit();
+        this.outcomeTracker = new OutcomeTracker(policyBandit);
         load();
+    }
+
+    public ServerContextTracker serverContext() {
+        return serverContext;
+    }
+
+    public PolicyBandit policyBandit() {
+        return policyBandit;
+    }
+
+    public OutcomeTracker outcomeTracker() {
+        return outcomeTracker;
     }
 
     public void hydratePlayer(PlayerFeatureState state) {
@@ -118,30 +128,6 @@ public class LearningStore {
         heapWindows.add(heapRatio, System.currentTimeMillis());
     }
 
-    public double policyScore(String policyKey) {
-        return policyScores.getOrDefault(policyKey, 1.0D);
-    }
-
-    public boolean isPolicyDeprioritized(String policyKey) {
-        return policyScore(policyKey) < DEPRIORITIZE_SCORE;
-    }
-
-    public void reinforcePolicy(String policyKey) {
-        if (!config.learningEnabled || policyKey == null) {
-            return;
-        }
-        policyScores.merge(policyKey, 1.0D, (old, ignored) -> clampScore(old + REINFORCE_DELTA));
-        reinforceCount++;
-    }
-
-    public void penalizePolicy(String policyKey) {
-        if (!config.learningEnabled || policyKey == null) {
-            return;
-        }
-        policyScores.merge(policyKey, 1.0D, (old, ignored) -> clampScore(old - PENALIZE_DELTA));
-        penalizeCount++;
-    }
-
     public void flush() {
         if (!config.learningEnabled) {
             return;
@@ -155,12 +141,15 @@ public class LearningStore {
         props.setProperty("heap.avg60s", formatRatio(heapWindows.avg60s(now)));
         props.setProperty("heap.avg15m", formatRatio(heapWindows.avg15m(now)));
         props.setProperty("heap.avg24h", formatRatio(heapWindows.avg24h(now)));
-        props.setProperty("learn.reinforce", Integer.toString(reinforceCount));
-        props.setProperty("learn.penalize", Integer.toString(penalizeCount));
+        props.setProperty("learn.completed", Integer.toString(outcomeTracker.completed()));
+        props.setProperty("learn.discarded", Integer.toString(outcomeTracker.discarded()));
+        props.setProperty("server.heap.q50", formatRatio(serverContext.q50()));
+        props.setProperty("server.heap.q75", formatRatio(serverContext.q75()));
+        props.setProperty("server.heap.q90", formatRatio(serverContext.q90()));
+        props.setProperty("server.heap.q97", formatRatio(serverContext.q97()));
+        props.setProperty("server.heap.samples", Integer.toString(serverContext.sampleCount()));
 
-        for (Map.Entry<String, Double> e : policyScores.entrySet()) {
-            props.setProperty("policy." + e.getKey(), Double.toString(e.getValue()));
-        }
+        writeBandit(props);
         for (Map.Entry<UUID, PersistedPlayer> e : players.entrySet()) {
             writePlayer(props, e.getKey(), e.getValue());
         }
@@ -169,7 +158,7 @@ public class LearningStore {
             Files.createDirectories(dataDir);
             Path target = dataDir.resolve(STATE_FILE);
             try (OutputStream out = Files.newOutputStream(target)) {
-                props.store(out, "LeanCore learning v2");
+                props.store(out, "LeanCore learning v3");
             }
             flushCount++;
         } catch (IOException ignored) {
@@ -179,14 +168,14 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v2 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% +%d -%d",
+                "learning=v3 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d",
                 config.learningEnabled,
                 flushCount,
                 players.size(),
                 lastTier,
                 heapWindows.avg60s(now) * 100.0D,
-                reinforceCount,
-                penalizeCount);
+                outcomeTracker.completed(),
+                outcomeTracker.discarded());
     }
 
     public String windowLine() {
@@ -195,6 +184,20 @@ public class LearningStore {
                 heapWindows.avg60s(now) * 100.0D,
                 heapWindows.avg15m(now) * 100.0D,
                 heapWindows.avg24h(now) * 100.0D);
+    }
+
+    public String serverLine() {
+        return String.format(Locale.ROOT,
+                "server q50=%.0f%% q75=%.0f%% q90=%.0f%% q97=%.0f%% samples=%d",
+                serverContext.q50() * 100.0D,
+                serverContext.q75() * 100.0D,
+                serverContext.q90() * 100.0D,
+                serverContext.q97() * 100.0D,
+                serverContext.sampleCount());
+    }
+
+    public double heapAvg60s() {
+        return heapWindows.avg60s(System.currentTimeMillis());
     }
 
     private void load() {
@@ -209,18 +212,24 @@ public class LearningStore {
             return;
         }
 
-        if (readInt(props, "schema", 0) != SCHEMA_VERSION) {
+        int schema = readInt(props, "schema", 0);
+        if (schema < 2) {
             return;
         }
 
-        for (String key : props.stringPropertyNames()) {
-            if (key.startsWith("policy.")) {
-                policyScores.put(key.substring("policy.".length()), readDouble(props, key, 1.0D));
-            }
+        loadPlayers(props);
+        if (schema >= 3) {
+            serverContext.hydrate(
+                    readDouble(props, "server.heap.q50", 0.0D),
+                    readDouble(props, "server.heap.q75", 0.0D),
+                    readDouble(props, "server.heap.q90", 0.0D),
+                    readDouble(props, "server.heap.q97", 0.0D)
+            );
+            loadBandit(props);
         }
-        reinforceCount = readInt(props, "learn.reinforce", 0);
-        penalizeCount = readInt(props, "learn.penalize", 0);
+    }
 
+    private void loadPlayers(Properties props) {
         for (String key : props.stringPropertyNames()) {
             if (!key.startsWith("player.")) {
                 continue;
@@ -238,6 +247,52 @@ public class LearningStore {
                     return base.withField(field, props.getProperty(key));
                 });
             } catch (IllegalArgumentException ignored) {
+            }
+        }
+    }
+
+    private void loadBandit(Properties props) {
+        for (String key : props.stringPropertyNames()) {
+            if (!key.startsWith("bandit.")) {
+                continue;
+            }
+            String suffix = key.substring("bandit.".length());
+            int dot = suffix.lastIndexOf('.');
+            if (dot <= 0) {
+                continue;
+            }
+            String armKey = suffix.substring(0, dot);
+            String field = suffix.substring(dot + 1);
+            PolicyBandit.ArmState arm = policyBandit.arms().computeIfAbsent(armKey, ignored -> new PolicyBandit.ArmState());
+            switch (field) {
+                case "pulls" -> arm.pulls = readInt(props, key, 0);
+                case "rewardSum" -> arm.rewardSum = readDouble(props, key, 0.0D);
+                default -> {
+                    if (field.startsWith("a.") && field.length() == 3) {
+                        int idx = field.charAt(2) - '0';
+                        if (idx >= 0 && idx < PolicyBandit.CONTEXT_DIM) {
+                            arm.aDiag[idx] = readDouble(props, key, 1.0D);
+                        }
+                    } else if (field.startsWith("b.") && field.length() == 3) {
+                        int idx = field.charAt(2) - '0';
+                        if (idx >= 0 && idx < PolicyBandit.CONTEXT_DIM) {
+                            arm.b[idx] = readDouble(props, key, 0.0D);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void writeBandit(Properties props) {
+        for (Map.Entry<String, PolicyBandit.ArmState> e : policyBandit.arms().entrySet()) {
+            String prefix = "bandit." + e.getKey() + ".";
+            PolicyBandit.ArmState arm = e.getValue();
+            props.setProperty(prefix + "pulls", Integer.toString(arm.pulls));
+            props.setProperty(prefix + "rewardSum", Double.toString(arm.rewardSum));
+            for (int i = 0; i < PolicyBandit.CONTEXT_DIM; i++) {
+                props.setProperty(prefix + "a." + i, Double.toString(arm.aDiag[i]));
+                props.setProperty(prefix + "b." + i, Double.toString(arm.b[i]));
             }
         }
     }
@@ -285,10 +340,6 @@ public class LearningStore {
 
     private static String formatRatio(double ratio) {
         return String.format(Locale.ROOT, "%.4f", ratio);
-    }
-
-    private static double clampScore(double score) {
-        return Math.max(MIN_POLICY_SCORE, Math.min(MAX_POLICY_SCORE, score));
     }
 
     private record PersistedPlayer(
