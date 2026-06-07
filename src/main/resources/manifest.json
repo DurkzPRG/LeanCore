@@ -1,0 +1,19 @@
+{
+    "Group": "durkz",
+    "Name": "LeanCore",
+    "Version": "0.1.0-SNAPSHOT",
+    "Description": "Adaptive RAM governance for solo worlds, friends co-op, and large servers. Spatial dormancy and behavior-weighted memory footprints.",
+    "Authors": [
+        {
+            "Name": "Durkz"
+        }
+    ],
+    "Website": "https://github.com/DurkzPRG/LeanCore",
+    "ServerVersion": ">=0.5.3",
+    "OptionalDependencies": {
+        
+    },
+    "DisabledByDefault": false,
+    "Main": "com.durkz.leancore.LeanCorePlugin",
+    "IncludesAssetPack": false
+}
