@@ -1,8 +1,11 @@
 package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.intelligence.FalseCutTracker;
+import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.intelligence.PlayerBehavior;
 import com.durkz.leancore.intelligence.RetentionDemand;
+import com.durkz.leancore.intelligence.RetentionDemandEstimator;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
@@ -18,9 +21,11 @@ import java.util.UUID;
 public class PolicyApplier {
 
     private final LeanCoreConfig config;
+    private final FalseCutTracker falseCutTracker;
 
-    public PolicyApplier(LeanCoreConfig config) {
+    public PolicyApplier(LeanCoreConfig config, FalseCutTracker falseCutTracker) {
         this.config = config;
+        this.falseCutTracker = falseCutTracker;
     }
 
     public int apply(GovernorPolicy policy, Collection<PlayerRef> online, Map<UUID, RetentionDemand> demands) {
@@ -60,8 +65,16 @@ public class PolicyApplier {
         if (player == null) {
             return;
         }
+        UUID playerId = playerRef.getUuid();
+        int current = player.getClientViewRadius();
         int target = targetRadius(player, policy, demand);
-        if (player.getClientViewRadius() != target) {
+        if (HoldoutSet.isHoldout(playerId) && target < current) {
+            return;
+        }
+        if (target < current && RetentionDemandEstimator.isHighDemand(demand.demand())) {
+            falseCutTracker.noteCut(true);
+        }
+        if (current != target) {
             player.setClientViewRadius(target);
         }
     }

@@ -7,6 +7,9 @@ public class PlayerFeatureState {
     static final double SIGNIFICANT_MOVE_BLOCKS = 2.0D;
     static final long HALF_LIFE_60S_MS = 60_000L;
     static final long HALF_LIFE_15M_MS = 15 * 60_000L;
+    private static final double CHUNK_BLEND_60 = 1.0D - Math.exp(-Math.log(2.0D) * 1000.0D / HALF_LIFE_60S_MS);
+    private static final double CHUNK_BLEND_15M = 1.0D - Math.exp(-Math.log(2.0D) * 1000.0D / HALF_LIFE_15M_MS);
+    private static final double MAX_SANE_CHUNK_EMA = 512.0D;
 
     private final UUID playerId;
 
@@ -18,6 +21,8 @@ public class PlayerFeatureState {
     private double emaBreaks15m;
     private double emaPlaces15m;
     private double emaZones15m;
+    private double emaChunks60;
+    private double emaChunks15m;
 
     private long lastActivityMs;
     private long firstSeenMs;
@@ -49,6 +54,8 @@ public class PlayerFeatureState {
             double breaks15m,
             double places15m,
             double zones15m,
+            double chunks60,
+            double chunks15m,
             long observedMs
     ) {
         this.emaMovement60 = movement60;
@@ -59,6 +66,8 @@ public class PlayerFeatureState {
         this.emaBreaks15m = breaks15m;
         this.emaPlaces15m = places15m;
         this.emaZones15m = zones15m;
+        this.emaChunks60 = sanitizeChunkEma(chunks60);
+        this.emaChunks15m = sanitizeChunkEma(chunks15m);
         this.observedMs = Math.max(0L, observedMs);
     }
 
@@ -78,6 +87,14 @@ public class PlayerFeatureState {
         emaZones60 += 1.0D;
         emaZones15m += 1.0D;
         touch();
+    }
+
+    public void sampleSpatial(double chunkPressure) {
+        if (chunkPressure <= 0.0D) {
+            return;
+        }
+        emaChunks60 = emaChunks60 * (1.0D - CHUNK_BLEND_60) + chunkPressure * CHUNK_BLEND_60;
+        emaChunks15m = emaChunks15m * (1.0D - CHUNK_BLEND_15M) + chunkPressure * CHUNK_BLEND_15M;
     }
 
     public void samplePosition(double x, double z) {
@@ -121,11 +138,13 @@ public class PlayerFeatureState {
         double shortTerm = emaMovement60 * 0.04D
                 + emaBreaks60 * 2.0D
                 + emaPlaces60 * 2.5D
-                + emaZones60 * 4.0D;
+                + emaZones60 * 4.0D
+                + emaChunks60 * 0.08D;
         double longTerm = emaMovement15m * 0.002D
                 + emaBreaks15m * 0.15D
                 + emaPlaces15m * 0.18D
-                + emaZones15m * 0.25D;
+                + emaZones15m * 0.25D
+                + emaChunks15m * 0.01D;
         return shortTerm + longTerm;
     }
 
@@ -169,6 +188,14 @@ public class PlayerFeatureState {
         return emaZones15m;
     }
 
+    public double emaChunks60() {
+        return emaChunks60;
+    }
+
+    public double emaChunks15m() {
+        return emaChunks15m;
+    }
+
     public long observedSec() {
         return observedMs / 1000L;
     }
@@ -179,5 +206,12 @@ public class PlayerFeatureState {
 
     private static double decay(long elapsedMs, long halfLifeMs) {
         return Math.exp(-Math.log(2.0D) * elapsedMs / halfLifeMs);
+    }
+
+    private static double sanitizeChunkEma(double value) {
+        if (value <= 0.0D || Double.isNaN(value) || Double.isInfinite(value)) {
+            return 0.0D;
+        }
+        return Math.min(value, MAX_SANE_CHUNK_EMA);
     }
 }

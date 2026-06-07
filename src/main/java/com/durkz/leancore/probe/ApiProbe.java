@@ -55,22 +55,25 @@ public final class ApiProbe {
         if (p == null || !p.isValid()) {
             return "S3 chunks: skip (no player)";
         }
-        return p.getChunkTracker() == null
-                ? "S3 chunks: fail (no ChunkTracker)"
-                : "S3 chunks: partial (tracker ok, no enumerate yet)";
+        PlayerSpatialProbe.SpatialSample sample = PlayerSpatialProbe.readChunks(p);
+        if (p.getChunkTracker() == null) {
+            return "S3 chunks: fail (no ChunkTracker)";
+        }
+        return String.format(Locale.ROOT,
+                "S3 chunks: ok loaded=%d loading=%d pressure=%.1f",
+                sample.loadedChunks(), sample.loadingChunks(), sample.chunkPressure());
     }
 
     private static String s4(PlayerRef p) {
         if (p == null || !p.isValid()) {
             return "S4 entities: skip (no player)";
         }
-        return p.getReference() == null
-                ? "S4 entities: fail (no entity ref)"
-                : "S4 entities: partial (ref ok, regional count TBD)";
+        return String.format(Locale.ROOT,
+                "S4 entities: partial worldEntities=%d (world wide, not regional)",
+                PlayerSpatialProbe.readWorldEntityCount(p));
     }
 
     private static String s5() {
         return "S5 unload: pending (governor not wired)";
     }
-
 }

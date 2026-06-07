@@ -27,6 +27,7 @@ public class LearningStore {
     private final RollingHeapTracker heapWindows = new RollingHeapTracker();
     private final ServerContextTracker serverContext;
     private final PolicyBandit policyBandit;
+    private final FalseCutTracker falseCutTracker;
     private final OutcomeTracker outcomeTracker;
 
     private MemoryTier lastTier = MemoryTier.COMFORT;
@@ -37,7 +38,8 @@ public class LearningStore {
         this.config = config;
         this.serverContext = new ServerContextTracker(config);
         this.policyBandit = new PolicyBandit();
-        this.outcomeTracker = new OutcomeTracker(policyBandit);
+        this.falseCutTracker = new FalseCutTracker();
+        this.outcomeTracker = new OutcomeTracker(policyBandit, falseCutTracker);
         load();
     }
 
@@ -51,6 +53,10 @@ public class LearningStore {
 
     public OutcomeTracker outcomeTracker() {
         return outcomeTracker;
+    }
+
+    public FalseCutTracker falseCutTracker() {
+        return falseCutTracker;
     }
 
     public void hydratePlayer(PlayerFeatureState state) {
@@ -67,6 +73,8 @@ public class LearningStore {
                 saved.breaks15m,
                 saved.places15m,
                 saved.zones15m,
+                saved.chunks60,
+                saved.chunks15m,
                 saved.observedSec * 1000L
         );
     }
@@ -112,6 +120,8 @@ public class LearningStore {
                 saved.breaks15m,
                 saved.places15m,
                 saved.zones15m,
+                saved.chunks60,
+                saved.chunks15m,
                 saved.observedSec * 1000L
         );
         return state;
@@ -143,6 +153,7 @@ public class LearningStore {
         props.setProperty("heap.avg24h", formatRatio(heapWindows.avg24h(now)));
         props.setProperty("learn.completed", Integer.toString(outcomeTracker.completed()));
         props.setProperty("learn.discarded", Integer.toString(outcomeTracker.discarded()));
+        props.setProperty("learn.falseCuts", Integer.toString(falseCutTracker.sessionCuts()));
         props.setProperty("server.heap.q50", formatRatio(serverContext.q50()));
         props.setProperty("server.heap.q75", formatRatio(serverContext.q75()));
         props.setProperty("server.heap.q90", formatRatio(serverContext.q90()));
@@ -168,14 +179,15 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v3 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d",
+                "learning=v3 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d",
                 config.learningEnabled,
                 flushCount,
                 players.size(),
                 lastTier,
                 heapWindows.avg60s(now) * 100.0D,
                 outcomeTracker.completed(),
-                outcomeTracker.discarded());
+                outcomeTracker.discarded(),
+                falseCutTracker.sessionCuts());
     }
 
     public String windowLine() {
@@ -311,6 +323,9 @@ public class LearningStore {
         props.setProperty(prefix + "breaks15m", Double.toString(player.breaks15m));
         props.setProperty(prefix + "places15m", Double.toString(player.places15m));
         props.setProperty(prefix + "zones15m", Double.toString(player.zones15m));
+        props.setProperty(prefix + "chunks60", Double.toString(player.chunks60));
+        props.setProperty(prefix + "chunks15m", Double.toString(player.chunks15m));
+        props.setProperty(prefix + "holdout", Boolean.toString(HoldoutSet.isHoldout(id)));
         props.setProperty(prefix + "observedSec", Long.toString(player.observedSec));
     }
 
@@ -355,6 +370,8 @@ public class LearningStore {
             double breaks15m,
             double places15m,
             double zones15m,
+            double chunks60,
+            double chunks15m,
             long observedSec
     ) {
         static PersistedPlayer empty() {
@@ -362,6 +379,7 @@ public class LearningStore {
                     0.5D, 0.0D, RetentionDemand.PRIOR_MB, PlayerBehavior.UNKNOWN,
                     0.0D, 0.0D, 0.0D, 0.0D,
                     0.0D, 0.0D, 0.0D, 0.0D,
+                    0.0D, 0.0D,
                     0L
             );
         }
@@ -371,6 +389,7 @@ public class LearningStore {
                     demand, confidence, retentionMb, debugLabel,
                     state.emaMovement60(), state.emaBreaks60(), state.emaPlaces60(), state.emaZones60(),
                     state.emaMovement15m(), state.emaBreaks15m(), state.emaPlaces15m(), state.emaZones15m(),
+                    state.emaChunks60(), state.emaChunks15m(),
                     state.observedSec()
             );
         }
@@ -389,6 +408,8 @@ public class LearningStore {
                     breaks15m,
                     places15m,
                     zones15m,
+                    chunks60,
+                    chunks15m,
                     observedSec
             );
         }
@@ -399,31 +420,35 @@ public class LearningStore {
             }
             return switch (field) {
                 case "demand" -> new PersistedPlayer(readDouble(raw, demand), confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "confidence" -> new PersistedPlayer(demand, readDouble(raw, confidence), retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "retentionMb" -> new PersistedPlayer(demand, confidence, readInt(raw, retentionMb), debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "label" -> new PersistedPlayer(demand, confidence, retentionMb, parseLabel(raw),
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "movement60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        readDouble(raw, movement60), breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, observedSec);
+                        readDouble(raw, movement60), breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "breaks60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, readDouble(raw, breaks60), places60, zones60, movement15m, breaks15m, places15m, zones15m, observedSec);
+                        movement60, readDouble(raw, breaks60), places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "places60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, readDouble(raw, places60), zones60, movement15m, breaks15m, places15m, zones15m, observedSec);
+                        movement60, breaks60, readDouble(raw, places60), zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "zones60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, readDouble(raw, zones60), movement15m, breaks15m, places15m, zones15m, observedSec);
+                        movement60, breaks60, places60, readDouble(raw, zones60), movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "movement15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, readDouble(raw, movement15m), breaks15m, places15m, zones15m, observedSec);
+                        movement60, breaks60, places60, zones60, readDouble(raw, movement15m), breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "breaks15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, readDouble(raw, breaks15m), places15m, zones15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, readDouble(raw, breaks15m), places15m, zones15m, chunks60, chunks15m, observedSec);
                 case "places15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, readDouble(raw, places15m), zones15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, readDouble(raw, places15m), zones15m, chunks60, chunks15m, observedSec);
                 case "zones15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, readDouble(raw, zones15m), observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, readDouble(raw, zones15m), chunks60, chunks15m, observedSec);
+                case "chunks60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, readDouble(raw, chunks60), chunks15m, observedSec);
+                case "chunks15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, readDouble(raw, chunks15m), observedSec);
                 case "observedSec" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, readLong(raw, observedSec));
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, readLong(raw, observedSec));
                 default -> this;
             };
         }

@@ -63,7 +63,7 @@ public class MemoryRuntime {
         MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext());
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         RetentionAllocator allocator = new RetentionAllocator(config);
-        PolicyApplier applier = new PolicyApplier(config);
+        PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker());
         MemoryGovernor governor = new MemoryGovernor(config, allocator, applier, learningStore);
         return new MemoryRuntime(
                 plugin,
@@ -114,6 +114,14 @@ public class MemoryRuntime {
 
     private void persistLearning() {
         classifier.syncToStore(learningStore);
+        var sample = lastSample;
+        if (sample != null) {
+            learningStore.outcomeTracker().flushPending(
+                    learningStore.heapAvg60s(),
+                    sample.onlinePlayers(),
+                    System.currentTimeMillis()
+            );
+        }
         learningStore.flush();
     }
 

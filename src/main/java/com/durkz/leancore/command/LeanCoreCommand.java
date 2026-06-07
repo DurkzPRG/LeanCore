@@ -2,6 +2,7 @@ package com.durkz.leancore.command;
 
 import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.dormancy.ZoneState;
+import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.intelligence.PlayerFeatureState;
 import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.probe.ApiProbe;
@@ -180,13 +181,13 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 return;
             }
             say(ctx, String.format(Locale.ROOT,
-                    "features move60=%.1f break60=%.1f place60=%.1f zone60=%.1f idle=%ds observed=%ds",
+                    "features move60=%.1f break60=%.1f chunks60=%.1f idle=%ds observed=%ds holdout=%s",
                     features.emaMovement60(),
                     features.emaBreaks60(),
-                    features.emaPlaces60(),
-                    features.emaZones60(),
+                    features.emaChunks60(),
                     features.idleSec(nowMs),
-                    features.observedSec()), "#AAAAAA");
+                    features.observedSec(),
+                    HoldoutSet.isHoldout(playerRef.getUuid())), "#AAAAAA");
         }
     }
 
