@@ -5,6 +5,7 @@ import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -83,5 +84,59 @@ public class ZoneDormancyMap {
                 .filter(e -> e.getValue() == ZoneState.HOT)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
+    }
+
+    public int demoteFarthestDormant(int maxZones) {
+        if (maxZones <= 0) {
+            return 0;
+        }
+
+        List<double[]> playerXZ = playerPositions();
+        if (playerXZ.isEmpty()) {
+            return 0;
+        }
+
+        List<Map.Entry<ZoneKey, Double>> dormant = zones.entrySet().stream()
+                .filter(e -> e.getValue() == ZoneState.DORMANT)
+                .map(e -> Map.entry(e.getKey(), minDistanceToPlayers(e.getKey(), playerXZ)))
+                .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
+                .limit(maxZones)
+                .collect(Collectors.toList());
+
+        int demoted = 0;
+        for (Map.Entry<ZoneKey, Double> entry : dormant) {
+            zones.put(entry.getKey(), ZoneState.FROZEN);
+            demoted++;
+        }
+        return demoted;
+    }
+
+    private List<double[]> playerPositions() {
+        List<double[]> out = new ArrayList<>();
+        for (PlayerRef ref : Universe.get().getPlayers()) {
+            if (!ref.isValid()) {
+                continue;
+            }
+            Transform t = ref.getTransform();
+            if (t == null || t.getPosition() == null) {
+                continue;
+            }
+            out.add(new double[]{t.getPosition().x, t.getPosition().z});
+        }
+        return out;
+    }
+
+    private static double minDistanceToPlayers(ZoneKey key, List<double[]> playerXZ) {
+        double cx = zoneCenterBlock(key.regionX());
+        double cz = zoneCenterBlock(key.regionZ());
+        double min = Double.MAX_VALUE;
+        for (double[] p : playerXZ) {
+            min = Math.min(min, Math.hypot(cx - p[0], cz - p[1]));
+        }
+        return min;
+    }
+
+    private static double zoneCenterBlock(int region) {
+        return region * ZoneKey.regionChunks() * 16.0D + (ZoneKey.regionChunks() * 16.0D) / 2.0D;
     }
 }

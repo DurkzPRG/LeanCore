@@ -16,9 +16,17 @@ public class LeanCoreConfig {
     private transient File configFile;
 
     public boolean enabled = true;
+    public boolean governEnabled = true;
+    public String preset = "AUTO";
     public boolean dedicatedServerMode = false;
     public int friendsMaxPlayers = 8;
     public int serverDensePlayerThreshold = 9;
+
+    public int minClientViewRadius = 4;
+    public int maxClientViewRadius = 32;
+    public int policyChangeMinIntervalSec = 30;
+    public int rollbackWindowSec = 60;
+    public double rollbackHeapDelta = 0.03;
 
     public double watchHeapRatio = 0.70;
     public double tightHeapRatio = 0.82;

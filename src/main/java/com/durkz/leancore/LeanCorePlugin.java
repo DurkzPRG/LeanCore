@@ -2,13 +2,10 @@ package com.durkz.leancore;
 
 import com.durkz.leancore.command.LeanCoreCommand;
 import com.durkz.leancore.config.LeanCoreConfig;
-import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.BehaviorSignalSystems;
 import com.durkz.leancore.intelligence.LearningStore;
-import com.durkz.leancore.memory.MemoryPressureSensor;
 import com.durkz.leancore.runtime.MemoryRuntime;
-import com.durkz.leancore.session.SessionModeDetector;
 import com.hypixel.hytale.server.core.event.events.ShutdownEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
@@ -64,15 +61,7 @@ public class LeanCorePlugin extends JavaPlugin {
         BehaviorSignalSystems.register(getEntityStoreRegistry(), classifier);
         getCommandRegistry().registerCommand(new LeanCoreCommand());
 
-        runtime = new MemoryRuntime(
-                this,
-                config,
-                new MemoryPressureSensor(config),
-                new ZoneDormancyMap(config),
-                classifier,
-                new SessionModeDetector(config),
-                learning
-        );
+        runtime = MemoryRuntime.create(this, config, classifier, learning);
 
         getLogger().atInfo().log("LeanCore %s setup.", getManifest().getVersion());
     }

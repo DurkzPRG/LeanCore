@@ -62,6 +62,11 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             say(ctx, "LeanCore " + plugin.getManifest().getVersion()
                     + " | " + rt.lastMode() + " | " + sample.onlinePlayers() + " online", "#FFAA00");
             say(ctx, "tier " + sample.tier() + " | spread " + (int) sample.playerSpreadBlocks() + " blocks", "#AAAAAA");
+            var gov = rt.governorStatus();
+            if (gov.enabled() && gov.policy() != null) {
+                say(ctx, "preset " + gov.preset() + " | policy " + gov.policy().key()
+                        + " | view " + String.format(Locale.ROOT, "%.0f%%", gov.policy().viewScale() * 100.0D), "#AAAAAA");
+            }
             say(ctx, rt.learningStore().statusLine(), "#888888");
         }
     }
@@ -83,7 +88,16 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     s.heapMaxBytes() / (1024 * 1024),
                     s.heapUsedRatio() * 100.0D,
                     s.tier()), "#FFAA00");
-            say(ctx, "governor idle until v0.2", "#888888");
+            var gov = rt.governorStatus();
+            if (!gov.enabled()) {
+                say(ctx, "governor disabled", "#888888");
+                return;
+            }
+            say(ctx, String.format(Locale.ROOT, "footprint %d/%d MB | demoted=%d reclaimed~%d MB",
+                    gov.totalFootprintMb(), gov.budgetMb(), gov.demotedZones(), gov.reclaimedMbEstimate()), "#AAAAAA");
+            if (gov.rolledBack()) {
+                say(ctx, "rollback active (policy reverted)", "#FF8888");
+            }
         }
     }
 

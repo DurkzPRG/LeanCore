@@ -5,8 +5,12 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.LearningStore;
+import com.durkz.leancore.memory.GovernorStatus;
+import com.durkz.leancore.memory.MemoryGovernor;
 import com.durkz.leancore.memory.MemoryPressureSensor;
 import com.durkz.leancore.memory.MemorySnapshot;
+import com.durkz.leancore.memory.PolicyApplier;
+import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
 import com.hypixel.hytale.server.core.universe.Universe;
@@ -24,6 +28,7 @@ public class MemoryRuntime {
     private final BehaviorClassifier classifier;
     private final SessionModeDetector sessionDetector;
     private final LearningStore learningStore;
+    private final MemoryGovernor governor;
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -36,7 +41,8 @@ public class MemoryRuntime {
             ZoneDormancyMap dormancyMap,
             BehaviorClassifier classifier,
             SessionModeDetector sessionDetector,
-            LearningStore learningStore
+            LearningStore learningStore,
+            MemoryGovernor governor
     ) {
         this.plugin = plugin;
         this.config = config;
@@ -45,6 +51,30 @@ public class MemoryRuntime {
         this.classifier = classifier;
         this.sessionDetector = sessionDetector;
         this.learningStore = learningStore;
+        this.governor = governor;
+    }
+
+    public static MemoryRuntime create(
+            LeanCorePlugin plugin,
+            LeanCoreConfig config,
+            BehaviorClassifier classifier,
+            LearningStore learningStore
+    ) {
+        MemoryPressureSensor sensor = new MemoryPressureSensor(config);
+        ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
+        RetentionAllocator allocator = new RetentionAllocator(config);
+        PolicyApplier applier = new PolicyApplier(config);
+        MemoryGovernor governor = new MemoryGovernor(config, allocator, applier);
+        return new MemoryRuntime(
+                plugin,
+                config,
+                sensor,
+                dormancyMap,
+                classifier,
+                new SessionModeDetector(config),
+                learningStore,
+                governor
+        );
     }
 
     public void start() {
@@ -94,8 +124,10 @@ public class MemoryRuntime {
         lastSample = sample;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
 
+        var behaviors = classifier.snapshotBehaviors();
         learningStore.noteTier(sample.tier());
-        learningStore.noteBehaviors(classifier.snapshotBehaviors());
+        learningStore.noteBehaviors(behaviors);
+        governor.tick(sample, lastMode, behaviors, dormancyMap);
     }
 
     public MemorySnapshot lastSample() {
@@ -113,5 +145,9 @@ public class MemoryRuntime {
 
     public LearningStore learningStore() {
         return learningStore;
+    }
+
+    public GovernorStatus governorStatus() {
+        return governor.status();
     }
 }

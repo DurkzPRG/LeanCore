@@ -7,6 +7,10 @@ public record ZoneKey(UUID worldUuid, int regionX, int regionZ) {
     // 4x4 chunks per region — coarse enough for dormancy, fine enough for co-op bases.
     private static final int REGION_CHUNKS = 4;
 
+    public static int regionChunks() {
+        return REGION_CHUNKS;
+    }
+
     public static ZoneKey fromBlockCoords(UUID worldUuid, double blockX, double blockZ) {
         int chunkX = (int) Math.floor(blockX / 16.0D);
         int chunkZ = (int) Math.floor(blockZ / 16.0D);
