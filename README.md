@@ -1,6 +1,6 @@
 # LeanCore
 
-**Server-side memory governance for Hytale hosts** — spatial dormancy, per-player retention, adaptive heap tiers, and staff diagnostics. One mod for solo worlds, friends co-op, and dedicated servers. Not a client FPS tweak.
+**Server-side memory governance for Hytale hosts** spatial dormancy, per-player retention, adaptive heap tiers, and staff diagnostics. One mod for solo worlds, friends co-op, and dedicated servers. Not a client FPS tweak.
 
 [![CurseForge](https://img.shields.io/badge/CurseForge-LeanCore-orange)](https://www.curseforge.com/hytale/mods/leancore)
 [![Documentation](https://img.shields.io/badge/Docs-DurkzPRG%20Mods-blue)](https://durkzprgmods.pages.dev/documentation/leancore)
@@ -10,7 +10,7 @@
   <img src="https://durkzprgmods.pages.dev/images/leancore.jpg" alt="LeanCore — server memory governor" width="672" />
 </p>
 
-LeanCore reduces JVM heap pressure through spatial dormancy, per-player retention budgets, and an adaptive governor that learns from your server's own heap history—not a one-size-fits-all RAM slider.
+LeanCore reduces JVM heap pressure through spatial dormancy, per-player retention budgets, and an adaptive governor that learns from your server's own heap history not a one size fits all RAM slider.
 
 Built for solo world owners, friends co-op, and dedicated servers that need **lower steady-state RAM** without guessing config values.
 
@@ -51,7 +51,7 @@ Built for solo world owners, friends co-op, and dedicated servers that need **lo
 
 ## Installation
 
-1. Download **LeanCore-1.0.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files) or [GitHub Releases](https://github.com/DurkzPRG/LeanCore/releases)
+1. Download **LeanCore-1.0.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Place the JAR in your server's **`mods/`** folder
 3. Start the server — config is created at **`mods/durkz_LeanCore/data/LeanCore.json`**
 4. Grant staff HUD/admin access (see [Permissions](#permissions))
@@ -91,7 +91,7 @@ Main command: **`/leancore`**
 
 ---
 
-## Configuration
+## Configuration & Permissions
 
 **Runtime config:** `mods/durkz_LeanCore/data/LeanCore.json`
 
@@ -124,12 +124,6 @@ Main command: **`/leancore`**
 - `mods/durkz_LeanCore/data/learning.state` — learning snapshot (schema v3)
 - `mods/durkz_LeanCore/data/hud.state` — per-player HUD toggles
 
-Full configuration reference: **[DurkzPRG Mods documentation](https://durkzprgmods.pages.dev/documentation/leancore)**
-
----
-
-## Permissions
-
 LeanCore uses **permission nodes** and/or **config group lists**. Either path grants access.
 
 | Permission | Description |
@@ -152,7 +146,7 @@ HUD only (no heatmap / zone pin):
 /perm group add Moderator durkz.leancore.hud
 ```
 
-Full permissions guide, `permissions.json` examples, and group setup: **[documentation](https://durkzprgmods.pages.dev/documentation/leancore)**
+Full permissions & configuration guide, `permissions.json` examples, and group setup: **[documentation](https://durkzprgmods.pages.dev/documentation/leancore)**
 
 ---
 
@@ -168,21 +162,6 @@ Full permissions guide, `permissions.json` examples, and group setup: **[documen
 2. `/leancore memory` — tier, heap %, governor status
 3. `/leancore learn` — quantiles and learning counters after several minutes
 4. Compare heap with `governEnabled=false` vs `true` on the same route (A/B)
-
----
-
-## Changelog (1.0.0)
-
-First stable public release.
-
-### Added
-
-- Memory governor (COMFORT → CRITICAL) with policy rollback
-- Spatial dormancy (HOT / WARM / DORMANT / FROZEN) and chunk unload sweeps
-- Per-player retention demand from live activity
-- In-process learning with `learning.state` persistence (schema v3)
-- Admin HUD (opt-in), heatmap, zone pin, optional CRITICAL webhook
-- Bundled server asset pack for HUD UI
 
 ---
 
