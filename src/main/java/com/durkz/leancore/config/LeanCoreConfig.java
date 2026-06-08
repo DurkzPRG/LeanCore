@@ -1,5 +1,6 @@
 package com.durkz.leancore.config;
 
+import com.durkz.leancore.runtime.RuntimeActivationPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
@@ -16,7 +17,14 @@ public class LeanCoreConfig {
     private transient File configFile;
 
     public boolean enabled = true;
-    public boolean governEnabled = true;
+    @Deprecated
+    public boolean localHostPassiveMode = false;
+    public String localHostMode = "AUTO";
+    public int runtimeInitialDelaySeconds = 30;
+    public int soloTickIntervalSeconds = 30;
+    public int friendsTickIntervalSeconds = 15;
+    public boolean governEnabled = false;
+    public boolean viewRadiusGovernanceEnabled = false;
     public String preset = "AUTO";
     public boolean dedicatedServerMode = false;
     public int friendsMaxPlayers = 8;
@@ -25,10 +33,12 @@ public class LeanCoreConfig {
     public int minClientViewRadius = 4;
     public int maxClientViewRadius = 32;
     public int policyChangeMinIntervalSec = 30;
-    public int policyApplyMinIntervalSeconds = 5;
-    public int runtimeTickIntervalSeconds = 2;
-    public int dormancyRefreshIntervalSeconds = 5;
-    public boolean unloadEnabled = true;
+    public int policyApplyMinIntervalSeconds = 15;
+    public int runtimeTickIntervalSeconds = 5;
+    public int dormancyRefreshIntervalSeconds = 15;
+    public int minViewRadiusDelta = 2;
+    public boolean unloadEnabled = false;
+    public boolean chunkUnloadEventTracking = false;
     public int unloadMinIntervalSeconds = 5;
     public int unloadMaxChunksPerSweep = 16;
     public int rollbackWindowSec = 60;
@@ -42,10 +52,10 @@ public class LeanCoreConfig {
     public int frozenAfterMinutes = 20;
     public int memoryBudgetMb = 0;
 
-    public boolean learningEnabled = true;
+    public boolean learningEnabled = false;
     public int persistIntervalSeconds = 300;
 
-    public boolean hudFeatureEnabled = true;
+    public boolean hudFeatureEnabled = false;
     public String[] hudViewerGroups = {"OP", "Admin"};
     public String[] hudAdminGroups = {"OP", "Admin"};
     public int hudUpdateIntervalSeconds = 3;
@@ -86,13 +96,31 @@ public class LeanCoreConfig {
 
     private void applyRuntimeDefaults() {
         if (policyApplyMinIntervalSeconds <= 0) {
-            policyApplyMinIntervalSeconds = 5;
+            policyApplyMinIntervalSeconds = 15;
         }
         if (runtimeTickIntervalSeconds <= 0) {
-            runtimeTickIntervalSeconds = 2;
+            runtimeTickIntervalSeconds = 5;
+        }
+        if (runtimeInitialDelaySeconds < 0) {
+            runtimeInitialDelaySeconds = 30;
+        }
+        if (soloTickIntervalSeconds <= 0) {
+            soloTickIntervalSeconds = 30;
+        }
+        if (friendsTickIntervalSeconds <= 0) {
+            friendsTickIntervalSeconds = 15;
+        }
+        if (localHostPassiveMode) {
+            localHostMode = RuntimeActivationPolicy.MODE_PASSIVE;
+        }
+        if (localHostMode == null || localHostMode.isBlank()) {
+            localHostMode = RuntimeActivationPolicy.MODE_AUTO;
         }
         if (dormancyRefreshIntervalSeconds <= 0) {
-            dormancyRefreshIntervalSeconds = 5;
+            dormancyRefreshIntervalSeconds = 15;
+        }
+        if (minViewRadiusDelta <= 0) {
+            minViewRadiusDelta = 2;
         }
         if (unloadMinIntervalSeconds <= 0) {
             unloadMinIntervalSeconds = 5;

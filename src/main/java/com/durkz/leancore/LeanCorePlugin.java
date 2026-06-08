@@ -6,8 +6,12 @@ import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.BehaviorSignalSystems;
 import com.durkz.leancore.intelligence.ChunkSignalSystems;
 import com.durkz.leancore.intelligence.LearningStore;
+import com.durkz.leancore.memory.MemoryPressureSensor;
+import com.durkz.leancore.memory.MemorySnapshot;
+import com.durkz.leancore.memory.ServerContextTracker;
 import com.durkz.leancore.permissions.LeanCorePermissions;
 import com.durkz.leancore.runtime.MemoryRuntime;
+import com.durkz.leancore.runtime.RuntimeActivationPolicy;
 import com.hypixel.hytale.server.core.event.events.ShutdownEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
@@ -21,6 +25,7 @@ public class LeanCorePlugin extends JavaPlugin {
 
     private LeanCoreConfig config;
     private MemoryRuntime runtime;
+    private MemoryPressureSensor passiveHeapSensor;
 
     public LeanCorePlugin(@NonNullDecl JavaPluginInit init) {
         super(init);
@@ -39,12 +44,36 @@ public class LeanCorePlugin extends JavaPlugin {
         return runtime;
     }
 
+    public boolean isPassiveMode() {
+        return RuntimeActivationPolicy.isFullyPassive(config);
+    }
+
+    public MemorySnapshot sampleHeapOnce() {
+        if (runtime != null) {
+            return runtime.lastSample();
+        }
+        if (passiveHeapSensor == null) {
+            passiveHeapSensor = new MemoryPressureSensor(new ServerContextTracker(config));
+        }
+        return passiveHeapSensor.sample();
+    }
+
     @Override
     protected void setup() {
         super.setup();
 
         config = LeanCoreConfig.load(getDataDirectory());
         LeanCorePermissions.register();
+        getCommandRegistry().registerCommand(new LeanCoreCommand());
+
+        if (RuntimeActivationPolicy.isFullyPassive(config)) {
+            getLogger().atInfo().log(
+                    "LeanCore %s local passive — set localHostMode AUTO for scaled runtime.",
+                    getManifest().getVersion()
+            );
+            return;
+        }
+
         LearningStore learning = new LearningStore(getDataDirectory(), config);
         BehaviorClassifier classifier = new BehaviorClassifier(learning);
 
@@ -69,12 +98,17 @@ public class LeanCorePlugin extends JavaPlugin {
         });
 
         BehaviorSignalSystems.register(getEntityStoreRegistry(), classifier);
-        ChunkSignalSystems.register(getChunkStoreRegistry(), learning.unloadOutcomeTracker());
-        getCommandRegistry().registerCommand(new LeanCoreCommand());
+        if (config.chunkUnloadEventTracking) {
+            ChunkSignalSystems.register(getChunkStoreRegistry(), learning.unloadOutcomeTracker());
+        }
 
         runtime = MemoryRuntime.create(this, config, classifier, learning);
 
-        getLogger().atInfo().log("LeanCore %s setup.", getManifest().getVersion());
+        getLogger().atInfo().log(
+                "LeanCore %s setup (localHostMode=%s).",
+                getManifest().getVersion(),
+                config.localHostMode
+        );
     }
 
     @Override
@@ -91,6 +125,7 @@ public class LeanCorePlugin extends JavaPlugin {
             runtime.shutdown();
             runtime = null;
         }
+        passiveHeapSensor = null;
         instance = null;
         super.shutdown();
     }

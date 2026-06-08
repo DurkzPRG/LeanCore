@@ -47,10 +47,26 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         return CompletableFuture.completedFuture(null);
     }
 
-    private static MemoryRuntime runtime(CommandContext ctx) {
+    private static LeanCorePlugin plugin(CommandContext ctx) {
         LeanCorePlugin plugin = LeanCorePlugin.getInstance();
-        if (plugin == null || plugin.runtime() == null) {
+        if (plugin == null) {
             ctx.sendMessage(Message.raw("LeanCore not loaded").color("#FF5555"));
+            return null;
+        }
+        return plugin;
+    }
+
+    private static MemoryRuntime runtime(CommandContext ctx) {
+        LeanCorePlugin plugin = plugin(ctx);
+        if (plugin == null) {
+            return null;
+        }
+        if (plugin.isPassiveMode()) {
+            say(ctx, "PASSIVE mode — runtime disabled. Use localHostMode AUTO.", "#FFAA00");
+            return null;
+        }
+        if (plugin.runtime() == null) {
+            ctx.sendMessage(Message.raw("LeanCore runtime unavailable").color("#FF5555"));
             return null;
         }
         return plugin.runtime();
@@ -67,14 +83,27 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            LeanCorePlugin plugin = plugin(ctx);
+            if (plugin == null) {
+                return;
+            }
+            if (plugin.isPassiveMode()) {
+                var sample = plugin.sampleHeapOnce();
+                say(ctx, "LeanCore " + plugin.getManifest().getVersion()
+                        + " | PASSIVE | " + sample.onlinePlayers() + " online", "#55FF55");
+                say(ctx, "tier " + sample.tier() + " | spread " + (int) sample.playerSpreadBlocks() + " blocks", "#AAAAAA");
+                say(ctx, "set localHostMode AUTO to enable scaled solo/friends runtime", "#888888");
+                return;
+            }
             MemoryRuntime rt = runtime(ctx);
             if (rt == null) {
                 return;
             }
             var sample = rt.lastSample();
-            LeanCorePlugin plugin = LeanCorePlugin.getInstance();
             say(ctx, "LeanCore " + plugin.getManifest().getVersion()
-                    + " | " + rt.lastMode() + " | " + sample.onlinePlayers() + " online", "#FFAA00");
+                    + " | profile " + rt.activeProfile()
+                    + " | " + rt.lastMode()
+                    + " | " + sample.onlinePlayers() + " online", "#FFAA00");
             say(ctx, "tier " + sample.tier() + " | spread " + (int) sample.playerSpreadBlocks() + " blocks", "#AAAAAA");
             var gov = rt.governorStatus();
             if (gov.enabled() && gov.policy() != null) {
@@ -94,16 +123,30 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
-            MemoryRuntime rt = runtime(ctx);
-            if (rt == null) {
+            LeanCorePlugin plugin = plugin(ctx);
+            if (plugin == null) {
                 return;
             }
-            var s = rt.lastSample();
+            var s = plugin.isPassiveMode() ? plugin.sampleHeapOnce() : null;
+            MemoryRuntime rt = plugin.isPassiveMode() ? null : runtime(ctx);
+            if (!plugin.isPassiveMode() && rt != null) {
+                s = rt.lastSample();
+            }
+            if (s == null) {
+                return;
+            }
             say(ctx, String.format(Locale.ROOT, "heap %d/%d MB (%.0f%%) tier=%s",
                     s.heapUsedBytes() / (1024 * 1024),
                     s.heapMaxBytes() / (1024 * 1024),
                     s.heapUsedRatio() * 100.0D,
                     s.tier()), "#FFAA00");
+            if (plugin.isPassiveMode()) {
+                say(ctx, "on-demand sample (PASSIVE)", "#888888");
+                return;
+            }
+            if (rt != null) {
+                say(ctx, "profile " + rt.activeProfile(), "#888888");
+            }
             var gov = rt.governorStatus();
             if (!gov.enabled()) {
                 say(ctx, "governor disabled", "#888888");

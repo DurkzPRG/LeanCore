@@ -81,9 +81,11 @@ public class MemoryGovernor {
         GovernorPolicy toApply = choosePolicy(pressurePolicy, preset, sample, demands);
         int scheduled = 0;
         if (toApply != null) {
-            Collection<PlayerRef> online = Universe.get().getPlayers();
-            boolean policyChanged = !samePolicy(activePolicy, toApply);
-            scheduled = applier.apply(toApply, online, demands, policyChanged);
+            if (shouldApplyViewRadius(sample)) {
+                Collection<PlayerRef> online = Universe.get().getPlayers();
+                boolean policyChanged = !samePolicy(activePolicy, toApply);
+                scheduled = applier.apply(toApply, online, demands, policyChanged);
+            }
             commitPolicy(toApply, sample, demands, nowMs);
         }
 
@@ -223,6 +225,16 @@ public class MemoryGovernor {
         }
         if (System.currentTimeMillis() >= until) {
             blacklistedUntilMs.remove(policyKey);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean shouldApplyViewRadius(MemorySnapshot sample) {
+        if (!config.viewRadiusGovernanceEnabled) {
+            return false;
+        }
+        if (!config.dedicatedServerMode && sample.onlinePlayers() <= 1) {
             return false;
         }
         return true;

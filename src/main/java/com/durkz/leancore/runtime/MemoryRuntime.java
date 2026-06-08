@@ -17,10 +17,10 @@ import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
 import com.durkz.leancore.ui.HudSessionStore;
 import com.durkz.leancore.ui.MemoryHudService;
+import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.universe.Universe;
 
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 public class MemoryRuntime {
@@ -39,7 +39,10 @@ public class MemoryRuntime {
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
-    private ScheduledExecutorService ticker;
+    private volatile RuntimeProfile activeProfile = RuntimeProfile.LITE;
+
+    private ScheduledFuture<?> tickFuture;
+    private ScheduledFuture<?> persistFuture;
     private long lastDormancyRefreshMs;
 
     public MemoryRuntime(
@@ -100,34 +103,30 @@ public class MemoryRuntime {
 
     public void start() {
         shutdown();
-        ticker = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "LeanCore-tick");
-            t.setDaemon(true);
-            return t;
-        });
-        long tickIntervalSec = Math.max(1, config.runtimeTickIntervalSeconds);
-        ticker.scheduleAtFixedRate(() -> {
-            try {
-                tick();
-            } catch (Exception e) {
-                plugin.getLogger().atWarning().withCause(e).log("tick failed");
-            }
-        }, 0L, tickIntervalSec, TimeUnit.SECONDS);
-
-        if (config.persistIntervalSeconds > 0) {
-            ticker.scheduleAtFixedRate(() -> {
-                try {
-                    persistLearning();
-                } catch (Exception e) {
-                    plugin.getLogger().atWarning().withCause(e).log("learning flush failed");
-                }
-            }, config.persistIntervalSeconds, config.persistIntervalSeconds, TimeUnit.SECONDS);
+        int playerCount = Universe.get().getPlayers().size();
+        activeProfile = RuntimeActivationPolicy.resolveProfile(config, playerCount);
+        if (activeProfile == null) {
+            activeProfile = RuntimeProfile.LITE;
         }
+        long initialDelay = Math.max(0, config.runtimeInitialDelaySeconds);
+        scheduleTick(initialDelay);
+        schedulePersistIfNeeded();
+        plugin.getLogger().atInfo().log(
+                "Runtime started profile=%s initialDelay=%ds tick=%ds",
+                activeProfile,
+                initialDelay,
+                activeProfile.tickIntervalSeconds(config)
+        );
     }
 
     public void shutdown() {
-        if (ticker == null) {
-            return;
+        if (tickFuture != null) {
+            tickFuture.cancel(false);
+            tickFuture = null;
+        }
+        if (persistFuture != null) {
+            persistFuture.cancel(false);
+            persistFuture = null;
         }
         persistLearning();
         if (hudService != null) {
@@ -136,8 +135,37 @@ public class MemoryRuntime {
         if (webhookNotifier != null) {
             webhookNotifier.shutdown();
         }
-        ticker.shutdownNow();
-        ticker = null;
+    }
+
+    private void scheduleTick(long delaySeconds) {
+        tickFuture = HytaleServer.SCHEDULED_EXECUTOR.schedule(
+                this::runTick,
+                Math.max(0L, delaySeconds),
+                TimeUnit.SECONDS
+        );
+    }
+
+    private void schedulePersistIfNeeded() {
+        if (!config.learningEnabled || config.persistIntervalSeconds <= 0) {
+            return;
+        }
+        persistFuture = HytaleServer.SCHEDULED_EXECUTOR.scheduleAtFixedRate(() -> {
+            try {
+                persistLearning();
+            } catch (Exception e) {
+                plugin.getLogger().atWarning().withCause(e).log("learning flush failed");
+            }
+        }, config.persistIntervalSeconds, config.persistIntervalSeconds, TimeUnit.SECONDS);
+    }
+
+    private void runTick() {
+        try {
+            tick();
+        } catch (Exception e) {
+            plugin.getLogger().atWarning().withCause(e).log("tick failed");
+        } finally {
+            scheduleTick(activeProfile.tickIntervalSeconds(config));
+        }
     }
 
     private void persistLearning() {
@@ -157,10 +185,26 @@ public class MemoryRuntime {
         if (!config.enabled) {
             return;
         }
+
+        int playerCount = Universe.get().getPlayers().size();
+        RuntimeProfile profile = RuntimeActivationPolicy.resolveProfile(config, playerCount);
+        if (profile == null) {
+            profile = RuntimeProfile.LITE;
+        }
+        if (profile != activeProfile) {
+            plugin.getLogger().atInfo().log(
+                    "Runtime profile %s -> %s (%d online)",
+                    activeProfile,
+                    profile,
+                    playerCount
+            );
+            activeProfile = profile;
+        }
+
         long nowMs = System.currentTimeMillis();
         var online = Universe.get().getPlayers();
-        classifier.samplePositions(online, nowMs);
-        long dormancyIntervalMs = Math.max(1, config.dormancyRefreshIntervalSeconds) * 1000L;
+
+        long dormancyIntervalMs = dormancyIntervalMs(profile);
         if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= dormancyIntervalMs) {
             dormancyMap.refreshFromPlayers();
             lastDormancyRefreshMs = nowMs;
@@ -170,26 +214,50 @@ public class MemoryRuntime {
         lastSample = sample;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
 
-        var demands = classifier.snapshotDemands(nowMs);
-        learningStore.noteHeap(sample.heapUsedRatio());
-        learningStore.noteTier(sample.tier());
-        learningStore.noteDemands(demands);
-        governor.tick(sample, lastMode, demands, dormancyMap);
-        double reward = learningStore.outcomeTracker().pollCompletedReward();
-        if (!Double.isNaN(reward)) {
-            learningStore.reinforceDemandOnReward(
-                    reward,
-                    demands,
-                    classifier.features().snapshot(),
-                    nowMs
-            );
+        if (profile == RuntimeProfile.LITE) {
+            return;
         }
-        if (webhookNotifier != null) {
+
+        if (profile.tracksPlayerMotion()) {
+            classifier.samplePositions(online, nowMs);
+        }
+
+        var demands = classifier.snapshotDemands(nowMs);
+        if (profile.runsLearning(config)) {
+            learningStore.noteHeap(sample.heapUsedRatio());
+            learningStore.noteTier(sample.tier());
+            learningStore.noteDemands(demands);
+        }
+
+        if (profile.runsGovernor(config)) {
+            governor.tick(sample, lastMode, demands, dormancyMap);
+            double reward = learningStore.outcomeTracker().pollCompletedReward();
+            if (!Double.isNaN(reward)) {
+                learningStore.reinforceDemandOnReward(
+                        reward,
+                        demands,
+                        classifier.features().snapshot(),
+                        nowMs
+                );
+            }
+        }
+
+        if (profile == RuntimeProfile.FULL && webhookNotifier != null) {
             webhookNotifier.onTier(sample.tier(), sample.heapUsedRatio());
         }
-        if (hudService != null) {
+
+        if (profile.runsHud(config) && hudService != null) {
             hudService.refresh(this);
         }
+    }
+
+    private long dormancyIntervalMs(RuntimeProfile profile) {
+        long base = Math.max(1, config.dormancyRefreshIntervalSeconds) * 1000L;
+        return switch (profile) {
+            case LITE -> Math.max(base, 30_000L);
+            case STANDARD -> Math.max(base, 20_000L);
+            case FULL -> base;
+        };
     }
 
     public MemorySnapshot lastSample() {
@@ -199,6 +267,10 @@ public class MemoryRuntime {
 
     public SessionMode lastMode() {
         return lastMode;
+    }
+
+    public RuntimeProfile activeProfile() {
+        return activeProfile;
     }
 
     public ZoneDormancyMap dormancyMap() {

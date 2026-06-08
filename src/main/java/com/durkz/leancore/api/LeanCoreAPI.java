@@ -19,8 +19,22 @@ public final class LeanCoreAPI {
     }
 
     public static boolean isLoaded() {
+        return LeanCorePlugin.getInstance() != null;
+    }
+
+    public static boolean isBackgroundRuntimeActive() {
         LeanCorePlugin plugin = LeanCorePlugin.getInstance();
-        return plugin != null && plugin.runtime() != null;
+        return plugin != null
+                && !plugin.isPassiveMode()
+                && plugin.runtime() != null;
+    }
+
+    public static boolean isScaledEmbeddedRuntime() {
+        LeanCorePlugin plugin = LeanCorePlugin.getInstance();
+        if (plugin == null || plugin.isPassiveMode() || plugin.runtime() == null || plugin.config() == null) {
+            return false;
+        }
+        return !plugin.config().dedicatedServerMode;
     }
 
     public static Optional<MemoryTier> currentTier() {
