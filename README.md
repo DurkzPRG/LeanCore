@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 <p align="center">
-  <img src="https://durkzprgmods.pages.dev/images/leancore.jpg" alt="LeanCore — server memory governor" width="672" />
+  <img src="https://durkzprgmods.pages.dev/images/leancore-banner-800.png" alt="LeanCore — server memory governor" width="672" />
 </p>
 
 LeanCore reduces JVM heap pressure through spatial dormancy, per-player retention budgets, and an adaptive governor that learns from your server's own heap history not a one size fits all RAM slider.
