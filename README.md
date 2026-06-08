@@ -1,6 +1,8 @@
 # LeanCore
 
-**Server-side memory governance for Hytale hosts** — spatial dormancy, per-player retention, adaptive heap tiers, and staff diagnostics. Scales on local worlds (solo vs friends). Not a client FPS or GPU tweak.
+LeanCore reduces JVM heap pressure through spatial dormancy, per-player retention budgets, and an adaptive governor that learns from your server's own heap history — not a one-size-fits-all RAM slider.
+
+On **embedded local worlds**, it runs a **light profile** (dormancy + heap tier) so it does not compete with the game client. When **friends join**, it scales up. On **dedicated hosts**, you get the full runtime.
 
 [![CurseForge](https://img.shields.io/badge/CurseForge-LeanCore-orange)](https://www.curseforge.com/hytale/mods/leancore)
 [![Documentation](https://img.shields.io/badge/Docs-DurkzPRG%20Mods-blue)](https://durkzprgmods.pages.dev/documentation/leancore)
@@ -9,10 +11,6 @@
 <p align="center">
   <img src="https://durkzprgmods.pages.dev/images/leancore-banner-800.png" alt="LeanCore — server memory governor" width="672" />
 </p>
-
-LeanCore reduces JVM heap pressure through spatial dormancy, per-player retention budgets, and an adaptive governor that learns from your server's own heap history — not a one-size-fits-all RAM slider.
-
-On **embedded local worlds**, it runs a **light profile** (dormancy + heap tier) so it does not compete with the game client. When **friends join**, it scales up. On **dedicated hosts**, you get the full runtime.
 
 ---
 
@@ -23,11 +21,6 @@ On **embedded local worlds**, it runs a **light profile** (dormancy + heap tier)
 - **Per-player demand**: explorers and builders weighted by live activity and a learned demand model
 - **Scaled runtime**: `LITE` solo → `STANDARD` friends → `FULL` dedicated
 - **Staff diagnostics**: commands, heatmap, optional admin HUD
-
-## What LeanCore is not
-
-- Not a client FPS, GPU, or TPS optimizer
-- Not a replacement for in-game graphics / view-distance settings on solo
 
 ---
 
@@ -194,12 +187,6 @@ Primary KPI is **server JVM heap**, not client FPS.
 3. Friend joins → log `profile LITE -> STANDARD`
 4. `/leancore learn` — `featureSchema=v1` after several minutes (if `learningEnabled`)
 5. Dedicated: `dedicatedServerMode: true` → `profile=FULL`
-
----
-
-## CurseForge release copy
-
-Paste-ready Summary, Changelog, and Description: **`docs/CURSEFORGE-1.1.0.md`** (local only; `docs/` is gitignored).
 
 ---
 
