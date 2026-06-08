@@ -1,6 +1,6 @@
 # LeanCore
 
-**Server-side memory governance for Hytale hosts** spatial dormancy, per-player retention, adaptive heap tiers, and staff diagnostics. One mod for solo worlds, friends co-op, and dedicated servers. Not a client FPS tweak.
+**Server-side memory governance for Hytale hosts** — spatial dormancy, per-player retention, adaptive heap tiers, and staff diagnostics. Scales on local worlds (solo vs friends). Not a client FPS or GPU tweak.
 
 [![CurseForge](https://img.shields.io/badge/CurseForge-LeanCore-orange)](https://www.curseforge.com/hytale/mods/leancore)
 [![Documentation](https://img.shields.io/badge/Docs-DurkzPRG%20Mods-blue)](https://durkzprgmods.pages.dev/documentation/leancore)
@@ -10,23 +10,41 @@
   <img src="https://durkzprgmods.pages.dev/images/leancore-banner-800.png" alt="LeanCore — server memory governor" width="672" />
 </p>
 
-LeanCore reduces JVM heap pressure through spatial dormancy, per-player retention budgets, and an adaptive governor that learns from your server's own heap history not a one size fits all RAM slider.
+LeanCore reduces JVM heap pressure through spatial dormancy, per-player retention budgets, and an adaptive governor that learns from your server's own heap history — not a one-size-fits-all RAM slider.
 
-Built for solo world owners, friends co-op, and dedicated servers that need **lower steady-state RAM** without guessing config values.
+On **embedded local worlds**, it runs a **light profile** (dormancy + heap tier) so it does not compete with the game client. When **friends join**, it scales up. On **dedicated hosts**, you get the full runtime.
 
 ---
 
 ## What LeanCore is
 
-- A **memory governor** that reads heap pressure and applies tiered policies
-- **Spatial intelligence**: inactive map regions cool down (WARM → DORMANT → FROZEN)
-- **Per-player demand**: explorers and builders are weighted by live activity, not fixed labels
-- **Adaptive calibration**: tier thresholds learn from this server's heap quantiles over time
-- **Transparency for staff**: diagnostics, heatmap, and an optional admin HUD
+- A **memory governor** (optional) that reads heap pressure and applies tiered policies
+- **Spatial dormancy**: inactive map regions cool down (WARM → DORMANT → FROZEN)
+- **Per-player demand**: explorers and builders weighted by live activity and a learned demand model
+- **Scaled runtime**: `LITE` solo → `STANDARD` friends → `FULL` dedicated
+- **Staff diagnostics**: commands, heatmap, optional admin HUD
 
 ## What LeanCore is not
 
-- Not a client FPS or TPS optimizer
+- Not a client FPS, GPU, or TPS optimizer
+- Not a replacement for in-game graphics / view-distance settings on solo
+
+---
+
+## Embedded host profiles (1.1)
+
+| Players | Profile | Tick | What runs |
+|---------|---------|------|-----------|
+| 1 (solo local) | `LITE` | 30s | Dormancy map + heap tier |
+| 2–8 (friends) | `STANDARD` | 15s | + classifier; govern/learning/HUD if enabled in config |
+| 9+ (dense local) | `FULL` | 5s | Full runtime per config |
+| Dedicated JVM | `FULL` | 5s | Full runtime per config |
+
+Config: `localHostMode: "AUTO"` (default). Use `"PASSIVE"` to disable background runtime entirely. Set `dedicatedServerMode: true` on a dedicated JVM host.
+
+Boot log (solo): `LeanCore 1.1.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE`. Friend joins → `profile LITE -> STANDARD`.
+
+View-radius governance never applies on embedded solo (1 player + not dedicated).
 
 ---
 
@@ -34,30 +52,36 @@ Built for solo world owners, friends co-op, and dedicated servers that need **lo
 
 | Area | What it does |
 |------|----------------|
-| **Memory tiers** | COMFORT, WATCH, TIGHT, CRITICAL with hysteresis and rollback on bad policy outcomes |
+| **Runtime profiles** | `LITE` (30s tick, dormancy only), `STANDARD` (friends), `FULL` (dedicated) |
+| **Memory tiers** | COMFORT, WATCH, TIGHT, CRITICAL with hysteresis and rollback |
 | **Zone dormancy** | HOT near players; idle wilderness demotes over configurable timers |
 | **Retention allocator** | Global memory budget with per-player footprints from demand scores |
-| **Policy applier** | Throttled client view-radius adjustments under pressure |
+| **Policy applier** | Throttled view-radius adjustments on **dedicated** hosts when enabled |
 | **Chunk unload** | Removes chunks in frozen/dormant zones when tiers require it |
 | **Learning store** | Rolling heap windows (60s / 15m / 24h), policy bandit, false-cut tracking; persists across restarts |
+| **Demand model (1.1)** | `OnlineLinearDemandModel`, feature schema v1 |
+| **Regional probe** | S4 entity counts per zone in `/leancore probe` |
+| **Unload counters** | Policy sweeps vs engine unloads in `/leancore learn` |
+| **Holdout (10%)** | Bandit learns on treatment players; holdout skips view-radius cuts |
 | **Presets** | AUTO → SOLO_LEAN, FRIENDS_NIGHT, or SERVER_DENSE from online player count |
-| **Admin HUD** | `/leancore hud on` — compact heap/tier overlay (**disabled by default**) |
+| **Admin HUD** | `/leancore hud on` — compact heap/tier overlay (**off by default**) |
 | **Heatmap** | `/leancore heatmap [limit]` — zone state summary for staff |
 | **Zone pin** | `/leancore zone pin\|unpin\|pins` — protect bases from demote/unload |
 | **Webhook** | Optional `criticalWebhookUrl` posts generic JSON on CRITICAL tier (off by default) |
+| **LeanCoreAPI** | Tier, zone pin, player snapshots for other mods |
 | **Asset pack** | Bundled server HUD `.ui` — no client mod required |
 
 ---
 
 ## Installation
 
-1. Download **LeanCore-1.0.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
-2. Place the JAR in your server's **`mods/`** folder
-3. Start the server — config is created at **`mods/durkz_LeanCore/data/LeanCore.json`**
-4. Grant staff HUD/admin access (see [Permissions](#permissions))
-5. Run `/leancore memory` and `/leancore status` after a few minutes
+1. Download **LeanCore-1.1.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+2. Place the JAR in your world's **`mods/`** folder
+3. Start — config is created at **`mods/durkz_LeanCore/data/LeanCore.json`**
+4. Solo boot log should show `localHostMode=AUTO` and `Runtime started profile=LITE`
+5. Run `/leancore status` after ~1 minute
 
-**Singleplayer / local host:** default `hudViewerGroups` / `hudAdminGroups` (`OP`, `Admin`) work out of the box, or grant permission nodes with `/perm`.
+**Singleplayer / local host:** default `localHostMode: "AUTO"` keeps overhead low. Grant HUD/admin via `hudViewerGroups` / `hudAdminGroups` or `/perm`.
 
 ---
 
@@ -67,12 +91,12 @@ Main command: **`/leancore`**
 
 | Command | Access | Description |
 |---------|--------|-------------|
-| `/leancore status` | Everyone | Governor, preset, and learning summary |
+| `/leancore status` | Everyone | Profile, preset, heap tier, learning summary |
 | `/leancore memory` | Everyone | Heap snapshot, tier, footprint, unload stats |
 | `/leancore zones` | Everyone | Dormancy map counters |
-| `/leancore learn` | Everyone | Learning diagnostics (bandit, quantiles, false cuts) |
-| `/leancore learn player` | Everyone | Your per-player demand features |
-| `/leancore probe` | Everyone | API capability probe |
+| `/leancore learn` | Everyone | Learning diagnostics (bandit, quantiles, demand model, unload stats) |
+| `/leancore learn player` | Everyone | Your per-player demand features and holdout cohort |
+| `/leancore probe` | Everyone | API capability probe (S1–S5), including regional S4 entity counts |
 | `/leancore hud on\|off\|status` | HUD viewers | Opt-in memory HUD overlay |
 | `/leancore heatmap [limit]` | Staff | Zone heatmap |
 | `/leancore zone pin\|unpin\|pins` | Staff | Pin zones to prevent demote/unload |
@@ -98,10 +122,17 @@ Main command: **`/leancore`**
 | Key | Default | Description |
 |-----|---------|-------------|
 | `enabled` | `true` | Master enable |
-| `governEnabled` | `true` | Apply governor policies |
-| `learningEnabled` | `true` | In-process policy learning |
+| `localHostMode` | `AUTO` | `AUTO`, `PASSIVE`, or `FULL` on embedded host |
+| `runtimeInitialDelaySeconds` | `30` | Delay before first background tick |
+| `soloTickIntervalSeconds` | `30` | LITE profile interval (1 player) |
+| `friendsTickIntervalSeconds` | `15` | STANDARD profile interval (2+ players) |
+| `governEnabled` | `false` | Apply governor policies (enable on dedicated after baseline) |
+| `viewRadiusGovernanceEnabled` | `false` | Server view-radius cuts (dedicated only; never solo embedded) |
+| `learningEnabled` | `false` | In-process policy learning |
+| `hudFeatureEnabled` | `false` | HUD feature available |
+| `chunkUnloadEventTracking` | `false` | Engine unload listener (off by default) |
 | `preset` | `AUTO` | `AUTO`, `SOLO_LEAN`, `FRIENDS_NIGHT`, `SERVER_DENSE` |
-| `dedicatedServerMode` | `false` | Force SERVER preset behavior |
+| `dedicatedServerMode` | `false` | Force FULL profile + SERVER preset behavior |
 | `friendsMaxPlayers` | `8` | FRIENDS band upper bound |
 | `serverDensePlayerThreshold` | `9` | SERVER preset from this count |
 | `memoryBudgetMb` | `0` | Global retention cap (`0` = auto share of heap) |
@@ -110,7 +141,6 @@ Main command: **`/leancore`**
 | `criticalHeapRatio` | `0.90` | Fixed tier threshold |
 | `dormantAfterMinutes` | `8` | WARM → DORMANT idle time |
 | `frozenAfterMinutes` | `20` | → FROZEN idle time |
-| `hudFeatureEnabled` | `true` | HUD feature available |
 | `hudViewerGroups` | `OP`, `Admin` | Groups that may toggle HUD |
 | `hudAdminGroups` | `OP`, `Admin` | Groups for heatmap and zone pin |
 | `hudUpdateIntervalSeconds` | `3` | HUD refresh interval |
@@ -131,9 +161,6 @@ LeanCore uses **permission nodes** and/or **config group lists**. Either path gr
 | `durkz.leancore.hud` | Toggle and view the opt-in memory HUD |
 | `durkz.leancore.admin` | Heatmap, zone pin/unpin/pins, and admin HUD tools |
 
-- **HUD viewers:** groups in `hudViewerGroups` and/or `durkz.leancore.hud`
-- **Staff tools:** groups in `hudAdminGroups` and/or `durkz.leancore.admin`
-
 ### Quick setup with `/perm`
 
 ```text
@@ -146,22 +173,33 @@ HUD only (no heatmap / zone pin):
 /perm group add Moderator durkz.leancore.hud
 ```
 
-Full permissions & configuration guide, `permissions.json` examples, and group setup: **[documentation](https://durkzprgmods.pages.dev/documentation/leancore)**
+Full guide: **[documentation](https://durkzprgmods.pages.dev/documentation/leancore)**
 
 ---
 
 ## Recommended usage
 
-- Run on the **server** (dedicated host or world host). Works on solo share-code worlds where you host locally.
-- Use `/leancore memory` at session start and after exploring to verify heap tier and governor status.
-- Primary KPI is **server JVM heap**, not client FPS.
+| Host type | Setup |
+|-----------|--------|
+| **Solo / local world** | `localHostMode: AUTO`, governor off — dormancy only, minimal overhead |
+| **Friends co-op (local)** | `AUTO` — profile becomes `STANDARD` when 2+ players join |
+| **Dedicated server** | `dedicatedServerMode: true`, then enable `governEnabled` after `/leancore memory` baseline |
+
+Primary KPI is **server JVM heap**, not client FPS.
 
 ### Verifying it works
 
-1. Boot log shows `LeanCore 1.0.0 setup.` with no errors
-2. `/leancore memory` — tier, heap %, governor status
-3. `/leancore learn` — quantiles and learning counters after several minutes
-4. Compare heap with `governEnabled=false` vs `true` on the same route (A/B)
+1. Boot log: `LeanCore 1.1.0 setup (localHostMode=AUTO).` and `profile=LITE` on solo
+2. `/leancore status` — profile, tier, player count
+3. Friend joins → log `profile LITE -> STANDARD`
+4. `/leancore learn` — `featureSchema=v1` after several minutes (if `learningEnabled`)
+5. Dedicated: `dedicatedServerMode: true` → `profile=FULL`
+
+---
+
+## CurseForge release copy
+
+Paste-ready Summary, Changelog, and Description: **`docs/CURSEFORGE-1.1.0.md`** (local only; `docs/` is gitignored).
 
 ---
 
@@ -185,7 +223,7 @@ Requirements: JDK compatible with your Hytale mod toolchain, Gradle wrapper incl
 ./gradlew build
 ```
 
-Output JAR: `build/libs/LeanCore-1.0.0.jar`
+Output JAR: `build/libs/LeanCore-1.1.0.jar`
 
 ---
 
