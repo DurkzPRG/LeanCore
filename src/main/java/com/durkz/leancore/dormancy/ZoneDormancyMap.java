@@ -1,6 +1,7 @@
 package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
@@ -84,6 +85,25 @@ public class ZoneDormancyMap {
                 .filter(e -> e.getValue() == ZoneState.HOT)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
+    }
+
+    public List<ZoneKey> unloadCandidateZones(MemoryTier tier) {
+        List<double[]> playerXZ = playerPositions();
+        if (playerXZ.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map.Entry<ZoneKey, Double>> ranked = new ArrayList<>();
+        for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
+            ZoneState state = entry.getValue();
+            if (state == ZoneState.FROZEN) {
+                ranked.add(Map.entry(entry.getKey(), minDistanceToPlayers(entry.getKey(), playerXZ)));
+            } else if (state == ZoneState.DORMANT && tier.ordinal() >= MemoryTier.TIGHT.ordinal()) {
+                ranked.add(Map.entry(entry.getKey(), minDistanceToPlayers(entry.getKey(), playerXZ)));
+            }
+        }
+        ranked.sort(Map.Entry.comparingByValue(Comparator.reverseOrder()));
+        return ranked.stream().map(Map.Entry::getKey).collect(Collectors.toList());
     }
 
     public int demoteFarthestDormant(int maxZones) {

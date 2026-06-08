@@ -25,6 +25,12 @@ public class LeanCoreConfig {
     public int minClientViewRadius = 4;
     public int maxClientViewRadius = 32;
     public int policyChangeMinIntervalSec = 30;
+    public int policyApplyMinIntervalSeconds = 5;
+    public int runtimeTickIntervalSeconds = 2;
+    public int dormancyRefreshIntervalSeconds = 5;
+    public boolean unloadEnabled = true;
+    public int unloadMinIntervalSeconds = 5;
+    public int unloadMaxChunksPerSweep = 16;
     public int rollbackWindowSec = 60;
     public double rollbackHeapDelta = 0.03;
 
@@ -58,12 +64,32 @@ public class LeanCoreConfig {
             LeanCoreConfig loaded = GSON.fromJson(reader, LeanCoreConfig.class);
             if (loaded != null) {
                 loaded.configFile = file;
+                loaded.applyRuntimeDefaults();
                 return loaded;
             }
         } catch (IOException ignored) {
         }
 
+        config.applyRuntimeDefaults();
         return config;
+    }
+
+    private void applyRuntimeDefaults() {
+        if (policyApplyMinIntervalSeconds <= 0) {
+            policyApplyMinIntervalSeconds = 5;
+        }
+        if (runtimeTickIntervalSeconds <= 0) {
+            runtimeTickIntervalSeconds = 2;
+        }
+        if (dormancyRefreshIntervalSeconds <= 0) {
+            dormancyRefreshIntervalSeconds = 5;
+        }
+        if (unloadMinIntervalSeconds <= 0) {
+            unloadMinIntervalSeconds = 5;
+        }
+        if (unloadMaxChunksPerSweep <= 0) {
+            unloadMaxChunksPerSweep = 16;
+        }
     }
 
     public void save() {

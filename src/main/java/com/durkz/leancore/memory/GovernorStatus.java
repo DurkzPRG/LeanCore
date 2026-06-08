@@ -9,10 +9,12 @@ public record GovernorStatus(
         int reclaimedMbEstimate,
         int totalFootprintMb,
         int budgetMb,
+        int unloadedChunks,
+        int unloadCandidateZones,
         boolean rolledBack,
         long secondsSinceChange
 ) {
     public static GovernorStatus idle() {
-        return new GovernorStatus(false, GovernorPreset.FRIENDS_NIGHT, null, 0, 0, 0, 0, 0, false, 0L);
+        return new GovernorStatus(false, GovernorPreset.FRIENDS_NIGHT, null, 0, 0, 0, 0, 0, 0, 0, false, 0L);
     }
 }

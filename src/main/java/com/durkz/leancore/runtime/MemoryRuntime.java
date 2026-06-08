@@ -2,6 +2,7 @@ package com.durkz.leancore.runtime;
 
 import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.LearningStore;
@@ -25,6 +26,7 @@ public class MemoryRuntime {
     private final LeanCoreConfig config;
     private final MemoryPressureSensor sensor;
     private final ZoneDormancyMap dormancyMap;
+    private final ZoneChunkUnloader zoneChunkUnloader;
     private final BehaviorClassifier classifier;
     private final SessionModeDetector sessionDetector;
     private final LearningStore learningStore;
@@ -33,12 +35,14 @@ public class MemoryRuntime {
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
     private ScheduledExecutorService ticker;
+    private long lastDormancyRefreshMs;
 
     public MemoryRuntime(
             LeanCorePlugin plugin,
             LeanCoreConfig config,
             MemoryPressureSensor sensor,
             ZoneDormancyMap dormancyMap,
+            ZoneChunkUnloader zoneChunkUnloader,
             BehaviorClassifier classifier,
             SessionModeDetector sessionDetector,
             LearningStore learningStore,
@@ -48,6 +52,7 @@ public class MemoryRuntime {
         this.config = config;
         this.sensor = sensor;
         this.dormancyMap = dormancyMap;
+        this.zoneChunkUnloader = zoneChunkUnloader;
         this.classifier = classifier;
         this.sessionDetector = sessionDetector;
         this.learningStore = learningStore;
@@ -62,14 +67,16 @@ public class MemoryRuntime {
     ) {
         MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext());
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
+        ZoneChunkUnloader zoneChunkUnloader = new ZoneChunkUnloader(config);
         RetentionAllocator allocator = new RetentionAllocator(config);
         PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker(), classifier.features());
-        MemoryGovernor governor = new MemoryGovernor(config, allocator, applier, learningStore);
+        MemoryGovernor governor = new MemoryGovernor(config, allocator, applier, zoneChunkUnloader, learningStore);
         return new MemoryRuntime(
                 plugin,
                 config,
                 sensor,
                 dormancyMap,
+                zoneChunkUnloader,
                 classifier,
                 new SessionModeDetector(config),
                 learningStore,
@@ -84,13 +91,14 @@ public class MemoryRuntime {
             t.setDaemon(true);
             return t;
         });
+        long tickIntervalSec = Math.max(1, config.runtimeTickIntervalSeconds);
         ticker.scheduleAtFixedRate(() -> {
             try {
                 tick();
             } catch (Exception e) {
                 plugin.getLogger().atWarning().withCause(e).log("tick failed");
             }
-        }, 0L, 1L, TimeUnit.SECONDS);
+        }, 0L, tickIntervalSec, TimeUnit.SECONDS);
 
         if (config.persistIntervalSeconds > 0) {
             ticker.scheduleAtFixedRate(() -> {
@@ -132,7 +140,11 @@ public class MemoryRuntime {
         long nowMs = System.currentTimeMillis();
         var online = Universe.get().getPlayers();
         classifier.samplePositions(online, nowMs);
-        dormancyMap.refreshFromPlayers();
+        long dormancyIntervalMs = Math.max(1, config.dormancyRefreshIntervalSeconds) * 1000L;
+        if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= dormancyIntervalMs) {
+            dormancyMap.refreshFromPlayers();
+            lastDormancyRefreshMs = nowMs;
+        }
 
         MemorySnapshot sample = sensor.sample();
         lastSample = sample;
@@ -156,6 +168,10 @@ public class MemoryRuntime {
 
     public ZoneDormancyMap dormancyMap() {
         return dormancyMap;
+    }
+
+    public ZoneChunkUnloader zoneChunkUnloader() {
+        return zoneChunkUnloader;
     }
 
     public LearningStore learningStore() {

@@ -3,7 +3,11 @@ package com.durkz.leancore.probe;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.durkz.leancore.dormancy.ZoneChunkUnloader;
+import com.durkz.leancore.dormancy.ZoneDormancyMap;
+import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import java.util.ArrayList;
@@ -15,14 +19,22 @@ public final class ApiProbe {
     private ApiProbe() {
     }
 
-    public static List<String> run(Store<EntityStore> store, Ref<EntityStore> ref, PlayerRef playerRef) {
+    public static List<String> run(
+            Store<EntityStore> store,
+            Ref<EntityStore> ref,
+            PlayerRef playerRef,
+            World world,
+            ZoneDormancyMap dormancyMap,
+            ZoneChunkUnloader unloader,
+            MemoryTier tier
+    ) {
         List<String> out = new ArrayList<>(6);
         out.add("probe:");
         out.add(s1(store, ref));
         out.add(s2(playerRef));
         out.add(s3(store, ref, playerRef));
         out.add(s4(playerRef));
-        out.add(s5());
+        out.add(s5(world, dormancyMap, unloader, tier));
         return out;
     }
 
@@ -85,7 +97,15 @@ public final class ApiProbe {
                 PlayerSpatialProbe.readWorldEntityCount(p));
     }
 
-    private static String s5() {
-        return "S5 unload: pending (governor not wired)";
+    private static String s5(World world, ZoneDormancyMap dormancyMap, ZoneChunkUnloader unloader, MemoryTier tier) {
+        if (world == null) {
+            return "S5 unload: skip (no world)";
+        }
+        int candidates = dormancyMap.unloadCandidateZones(tier).size();
+        return String.format(Locale.ROOT,
+                "S5 unload: ok api=ChunkStore.remove(UNLOAD) candidates=%d lastUnloaded=%d storeLoaded=%d",
+                candidates,
+                unloader.lastUnloadedChunks(),
+                world.getChunkStore().getLoadedChunksCount());
     }
 }

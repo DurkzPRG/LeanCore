@@ -99,8 +99,14 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 say(ctx, "governor disabled", "#888888");
                 return;
             }
-            say(ctx, String.format(Locale.ROOT, "footprint %d/%d MB | demoted=%d reclaimed~%d MB",
-                    gov.totalFootprintMb(), gov.budgetMb(), gov.demotedZones(), gov.reclaimedMbEstimate()), "#AAAAAA");
+            say(ctx, String.format(Locale.ROOT,
+                    "footprint %d/%d MB | demoted=%d reclaimed~%d MB | unloaded=%d chunks candidates=%d",
+                    gov.totalFootprintMb(),
+                    gov.budgetMb(),
+                    gov.demotedZones(),
+                    gov.reclaimedMbEstimate(),
+                    gov.unloadedChunks(),
+                    gov.unloadCandidateZones()), "#AAAAAA");
             if (gov.rolledBack()) {
                 say(ctx, "rollback active (policy reverted)", "#FF8888");
             }
@@ -199,7 +205,18 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
-            for (String line : ApiProbe.run(store, ref, playerRef)) {
+            MemoryRuntime rt = runtime(ctx);
+            if (rt == null) {
+                return;
+            }
+            for (String line : ApiProbe.run(
+                    store,
+                    ref,
+                    playerRef,
+                    world,
+                    rt.dormancyMap(),
+                    rt.zoneChunkUnloader(),
+                    rt.lastSample().tier())) {
                 say(ctx, line, "#AAAAAA");
             }
         }
