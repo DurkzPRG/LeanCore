@@ -76,7 +76,7 @@ public class MemoryRuntime {
     ) {
         MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext());
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
-        ZoneChunkUnloader zoneChunkUnloader = new ZoneChunkUnloader(config);
+        ZoneChunkUnloader zoneChunkUnloader = new ZoneChunkUnloader(config, learningStore.unloadOutcomeTracker());
         RetentionAllocator allocator = new RetentionAllocator(config);
         PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker(), classifier.features());
         MemoryGovernor governor = new MemoryGovernor(config, allocator, applier, zoneChunkUnloader, learningStore);
@@ -175,6 +175,15 @@ public class MemoryRuntime {
         learningStore.noteTier(sample.tier());
         learningStore.noteDemands(demands);
         governor.tick(sample, lastMode, demands, dormancyMap);
+        double reward = learningStore.outcomeTracker().pollCompletedReward();
+        if (!Double.isNaN(reward)) {
+            learningStore.reinforceDemandOnReward(
+                    reward,
+                    demands,
+                    classifier.features().snapshot(),
+                    nowMs
+            );
+        }
         if (webhookNotifier != null) {
             webhookNotifier.onTier(sample.tier(), sample.heapUsedRatio());
         }

@@ -159,10 +159,12 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 return;
             }
             say(ctx, rt.learningStore().statusLine(), "#FFAA00");
+            say(ctx, rt.learningStore().mlStatusLine(), "#FFAA00");
+            say(ctx, rt.learningStore().unloadOutcomeTracker().statusLine(), "#AAAAAA");
             say(ctx, rt.learningStore().windowLine(), "#888888");
             say(ctx, rt.learningStore().serverLine(), "#888888");
             say(ctx, rt.learningStore().policyBandit().topArmLine(), "#AAAAAA");
-            say(ctx, "retention uses demand scores; behavior labels are debug only", "#888888");
+            say(ctx, "holdout=10% skips view-radius cuts; bandit learns from treatment cohort only", "#888888");
         }
     }
 

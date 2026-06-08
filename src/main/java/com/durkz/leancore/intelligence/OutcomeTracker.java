@@ -17,6 +17,7 @@ public class OutcomeTracker {
     private Pending pending;
     private int discarded;
     private int completed;
+    private volatile double lastCompletedReward = Double.NaN;
 
     public OutcomeTracker(PolicyBandit bandit, FalseCutTracker falseCutTracker) {
         this.bandit = bandit;
@@ -65,6 +66,12 @@ public class OutcomeTracker {
         return completed;
     }
 
+    public double pollCompletedReward() {
+        double reward = lastCompletedReward;
+        lastCompletedReward = Double.NaN;
+        return reward;
+    }
+
     private void closePending(double heapRatio, int playerCount, long nowMs, boolean timed) {
         if (pending == null) {
             return;
@@ -106,6 +113,7 @@ public class OutcomeTracker {
         reward -= falseCutTracker.windowCuts() * FALSE_CUT_PENALTY;
         bandit.update(pending.armKey, pending.context, reward);
         completed++;
+        lastCompletedReward = reward;
         pending = null;
     }
 

@@ -1,6 +1,7 @@
 package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.intelligence.UnloadOutcomeTracker;
 import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
@@ -24,13 +25,15 @@ import java.util.concurrent.TimeoutException;
 public class ZoneChunkUnloader {
 
     private final LeanCoreConfig config;
+    private final UnloadOutcomeTracker unloadOutcomeTracker;
 
     private volatile int lastUnloadedChunks;
     private volatile int lastCandidateZones;
     private long lastSweepMs;
 
-    public ZoneChunkUnloader(LeanCoreConfig config) {
+    public ZoneChunkUnloader(LeanCoreConfig config, UnloadOutcomeTracker unloadOutcomeTracker) {
         this.config = config;
+        this.unloadOutcomeTracker = unloadOutcomeTracker;
     }
 
     public int sweep(ZoneDormancyMap dormancyMap, MemoryTier tier) {
@@ -86,6 +89,10 @@ public class ZoneChunkUnloader {
         lastSweepMs = nowMs;
         lastCandidateZones = candidates.size();
         lastUnloadedChunks = unloaded;
+        if (unloadOutcomeTracker != null) {
+            unloadOutcomeTracker.beginSweepWindow();
+            unloadOutcomeTracker.notePolicyUnload(unloaded);
+        }
         return unloaded;
     }
 

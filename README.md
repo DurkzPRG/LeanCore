@@ -57,7 +57,7 @@ Built for solo world owners, friends co-op, and dedicated servers that need **lo
 4. Grant staff HUD/admin access (see [Permissions](#permissions))
 5. Run `/leancore memory` and `/leancore status` after a few minutes
 
-**Singleplayer / local host:** default `hudViewerGroups` / `hudAdminGroups` (`OP`, `Admin`) work out of the box, or grant permission nodes with `/perm`.
+**Solo / local embedded server:** Hytale singleplayer runs a local server JVM on your machine (mods load there). This is **not** offline play — the launcher still requires internet for authentication. Default `hudViewerGroups` / `hudAdminGroups` (`OP`, `Admin`) work out of the box, or grant permission nodes with `/perm`.
 
 ---
 

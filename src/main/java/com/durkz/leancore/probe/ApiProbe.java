@@ -33,7 +33,7 @@ public final class ApiProbe {
         out.add(s1(store, ref));
         out.add(s2(playerRef));
         out.add(s3(store, ref, playerRef));
-        out.add(s4(playerRef));
+        out.add(s4(playerRef, world));
         out.add(s5(world, dormancyMap, unloader, tier));
         return out;
     }
@@ -88,13 +88,11 @@ public final class ApiProbe {
                 budget);
     }
 
-    private static String s4(PlayerRef p) {
+    private static String s4(PlayerRef p, World world) {
         if (p == null || !p.isValid()) {
             return "S4 entities: skip (no player)";
         }
-        return String.format(Locale.ROOT,
-                "S4 entities: partial worldEntities=%d (world wide, not regional)",
-                PlayerSpatialProbe.readWorldEntityCount(p));
+        return RegionalEntityProbe.read(p, world).probeLine();
     }
 
     private static String s5(World world, ZoneDormancyMap dormancyMap, ZoneChunkUnloader unloader, MemoryTier tier) {

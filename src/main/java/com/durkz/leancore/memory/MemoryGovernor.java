@@ -3,6 +3,7 @@ package com.durkz.leancore.memory;
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
+import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.intelligence.LearningStore;
 import com.durkz.leancore.intelligence.OutcomeTracker;
 import com.durkz.leancore.intelligence.PolicyBandit;
@@ -181,13 +182,27 @@ public class MemoryGovernor {
                 sample.tier(),
                 learningStore.serverContext().q50()
         );
-        outcomeTracker.onPolicyApplied(
-                toApply.key(),
-                contextAtChange,
-                sample.heapUsedRatio(),
-                sample.onlinePlayers(),
-                nowMs
-        );
+        if (hasTreatmentCohort(demands)) {
+            outcomeTracker.onPolicyApplied(
+                    toApply.key(),
+                    contextAtChange,
+                    sample.heapUsedRatio(),
+                    sample.onlinePlayers(),
+                    nowMs
+            );
+        }
+    }
+
+    private static boolean hasTreatmentCohort(Map<UUID, RetentionDemand> demands) {
+        if (demands == null || demands.isEmpty()) {
+            return true;
+        }
+        for (UUID playerId : demands.keySet()) {
+            if (!HoldoutSet.isHoldout(playerId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static double meanDemand(Map<UUID, RetentionDemand> demands) {

@@ -29,6 +29,8 @@ public class LearningStore {
     private final PolicyBandit policyBandit;
     private final FalseCutTracker falseCutTracker;
     private final OutcomeTracker outcomeTracker;
+    private final OnlineLinearDemandModel demandModel;
+    private final UnloadOutcomeTracker unloadOutcomeTracker;
 
     private MemoryTier lastTier = MemoryTier.COMFORT;
     private int flushCount;
@@ -40,6 +42,8 @@ public class LearningStore {
         this.policyBandit = new PolicyBandit();
         this.falseCutTracker = new FalseCutTracker();
         this.outcomeTracker = new OutcomeTracker(policyBandit, falseCutTracker);
+        this.demandModel = new OnlineLinearDemandModel();
+        this.unloadOutcomeTracker = new UnloadOutcomeTracker();
         load();
     }
 
@@ -57,6 +61,39 @@ public class LearningStore {
 
     public FalseCutTracker falseCutTracker() {
         return falseCutTracker;
+    }
+
+    public DemandModel demandModel() {
+        return demandModel;
+    }
+
+    public OnlineLinearDemandModel linearDemandModel() {
+        return demandModel;
+    }
+
+    public UnloadOutcomeTracker unloadOutcomeTracker() {
+        return unloadOutcomeTracker;
+    }
+
+    public void reinforceDemandOnReward(
+            double reward,
+            Map<UUID, RetentionDemand> demands,
+            Map<UUID, PlayerFeatureState> features,
+            long nowMs
+    ) {
+        if (!config.learningEnabled || reward <= 0.0D || demands == null || features == null) {
+            return;
+        }
+        for (Map.Entry<UUID, RetentionDemand> entry : demands.entrySet()) {
+            if (HoldoutSet.isHoldout(entry.getKey())) {
+                continue;
+            }
+            PlayerFeatureState state = features.get(entry.getKey());
+            if (state == null) {
+                continue;
+            }
+            demandModel.onOutcome(entry.getKey(), state, entry.getValue().demand(), reward, nowMs);
+        }
     }
 
     public void hydratePlayer(PlayerFeatureState state) {
@@ -154,6 +191,13 @@ public class LearningStore {
         props.setProperty("learn.completed", Integer.toString(outcomeTracker.completed()));
         props.setProperty("learn.discarded", Integer.toString(outcomeTracker.discarded()));
         props.setProperty("learn.falseCuts", Integer.toString(falseCutTracker.sessionCuts()));
+        props.setProperty("features.schema", Integer.toString(FeatureSchema.VERSION));
+        props.setProperty("demand.updates", Integer.toString(demandModel.updates()));
+        props.setProperty("unload.policy", Integer.toString(unloadOutcomeTracker.policyUnloads()));
+        props.setProperty("unload.engine", Integer.toString(unloadOutcomeTracker.engineUnloads()));
+        for (int i = 0; i < FeatureSchema.DEMAND_DIM; i++) {
+            props.setProperty("demand.w." + i, Double.toString(demandModel.weights()[i]));
+        }
         props.setProperty("server.heap.q50", formatRatio(serverContext.q50()));
         props.setProperty("server.heap.q75", formatRatio(serverContext.q75()));
         props.setProperty("server.heap.q90", formatRatio(serverContext.q90()));
@@ -188,6 +232,10 @@ public class LearningStore {
                 outcomeTracker.completed(),
                 outcomeTracker.discarded(),
                 falseCutTracker.sessionCuts());
+    }
+
+    public String mlStatusLine() {
+        return FeatureSchema.versionLine() + " | " + demandModel.statusLine();
     }
 
     public String windowLine() {
@@ -238,7 +286,20 @@ public class LearningStore {
                     readDouble(props, "server.heap.q97", 0.0D)
             );
             loadBandit(props);
+            loadDemandModel(props);
+            unloadOutcomeTracker.hydrate(
+                    readInt(props, "unload.policy", 0),
+                    readInt(props, "unload.engine", 0)
+            );
         }
+    }
+
+    private void loadDemandModel(Properties props) {
+        double[] weights = new double[FeatureSchema.DEMAND_DIM];
+        for (int i = 0; i < FeatureSchema.DEMAND_DIM; i++) {
+            weights[i] = readDouble(props, "demand.w." + i, weights[i]);
+        }
+        demandModel.hydrate(weights, readInt(props, "demand.updates", 0));
     }
 
     private void loadPlayers(Properties props) {

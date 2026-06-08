@@ -1,7 +1,7 @@
 {
     "Group": "durkz",
     "Name": "LeanCore",
-    "Version": "1.0.0",
+    "Version": "1.1.0",
     "Description": "Adaptive RAM governance for solo worlds, friends co-op, and large servers. Spatial dormancy and behavior-weighted memory footprints.",
     "Authors": [
         {

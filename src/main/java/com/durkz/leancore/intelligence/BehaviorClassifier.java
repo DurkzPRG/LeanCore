@@ -11,10 +11,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BehaviorClassifier {
 
     private final PlayerFeatureTracker features;
-    private final RetentionDemandEstimator estimator = new RetentionDemandEstimator();
+    private final LearningStore learningStore;
     private final Map<UUID, PlayerMemoryProfile> debugProfiles = new ConcurrentHashMap<>();
 
     public BehaviorClassifier(LearningStore learningStore) {
+        this.learningStore = learningStore;
         this.features = new PlayerFeatureTracker(learningStore);
     }
 
@@ -70,7 +71,7 @@ public class BehaviorClassifier {
     }
 
     public Map<UUID, RetentionDemand> snapshotDemands(long nowMs) {
-        return estimator.estimate(features.snapshot(), snapshotBehaviors(nowMs), nowMs);
+        return learningStore.demandModel().estimate(features.snapshot(), snapshotBehaviors(nowMs), nowMs);
     }
 
     public void syncToStore(LearningStore store) {
