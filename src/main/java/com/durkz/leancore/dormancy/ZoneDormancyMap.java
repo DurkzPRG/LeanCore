@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -20,6 +21,7 @@ public class ZoneDormancyMap {
     private final LeanCoreConfig config;
     private final Map<ZoneKey, ZoneState> zones = new ConcurrentHashMap<>();
     private final Map<ZoneKey, Long> lastHotAtMs = new ConcurrentHashMap<>();
+    private final Set<ZoneKey> pinned = ConcurrentHashMap.newKeySet();
 
     public ZoneDormancyMap(LeanCoreConfig config) {
         this.config = config;
@@ -43,7 +45,8 @@ public class ZoneDormancyMap {
         }
 
         for (Map.Entry<ZoneKey, Long> entry : lastHotAtMs.entrySet()) {
-            if (next.containsKey(entry.getKey())) {
+            ZoneKey key = entry.getKey();
+            if (next.containsKey(key) || pinned.contains(key)) {
                 continue;
             }
             long idleMin = (now - entry.getValue()) / 60_000L;
@@ -55,11 +58,86 @@ public class ZoneDormancyMap {
             } else {
                 state = ZoneState.WARM;
             }
-            next.put(entry.getKey(), state);
+            next.put(key, state);
+        }
+
+        for (ZoneKey key : pinned) {
+            next.put(key, ZoneState.HOT);
+            lastHotAtMs.put(key, now);
         }
 
         zones.clear();
         zones.putAll(next);
+    }
+
+    public ZoneState stateOf(ZoneKey key) {
+        return zones.getOrDefault(key, ZoneState.WARM);
+    }
+
+    public long idleMinutes(ZoneKey key) {
+        Long lastHot = lastHotAtMs.get(key);
+        if (lastHot == null) {
+            return 0L;
+        }
+        return Math.max(0L, (System.currentTimeMillis() - lastHot) / 60_000L);
+    }
+
+    public boolean isPinned(ZoneKey key) {
+        return key != null && pinned.contains(key);
+    }
+
+    public boolean pinZone(ZoneKey key) {
+        if (key == null) {
+            return false;
+        }
+        if (pinned.size() >= Math.max(1, config.zonePinMaxCount) && !pinned.contains(key)) {
+            return false;
+        }
+        pinned.add(key);
+        zones.put(key, ZoneState.HOT);
+        lastHotAtMs.put(key, System.currentTimeMillis());
+        return true;
+    }
+
+    public boolean unpinZone(ZoneKey key) {
+        return key != null && pinned.remove(key);
+    }
+
+    public List<ZoneKey> pinnedZones() {
+        return pinned.stream().sorted(ZoneDormancyMap::compareZoneKeys).collect(Collectors.toList());
+    }
+
+    public List<ZoneHeatmapEntry> heatmapEntries(int limit) {
+        int cap = Math.max(1, limit);
+        List<double[]> playerXZ = playerPositions();
+        List<ZoneHeatmapEntry> rows = new ArrayList<>();
+        for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
+            ZoneKey key = entry.getKey();
+            rows.add(new ZoneHeatmapEntry(
+                    key,
+                    entry.getValue(),
+                    idleMinutes(key),
+                    pinned.contains(key),
+                    (int) Math.round(minDistanceToPlayers(key, playerXZ))
+            ));
+        }
+        rows.sort((a, b) -> {
+            int byState = Integer.compare(b.state().ordinal(), a.state().ordinal());
+            if (byState != 0) {
+                return byState;
+            }
+            int byIdle = Long.compare(b.idleMinutes(), a.idleMinutes());
+            if (byIdle != 0) {
+                return byIdle;
+            }
+            return compareZoneKeys(a.key(), b.key());
+        });
+        return rows.stream().limit(cap).collect(Collectors.toList());
+    }
+
+    private static int compareZoneKeys(ZoneKey a, ZoneKey b) {
+        int byX = Integer.compare(a.regionX(), b.regionX());
+        return byX != 0 ? byX : Integer.compare(a.regionZ(), b.regionZ());
     }
 
     public int countByState(ZoneState state) {
@@ -95,6 +173,9 @@ public class ZoneDormancyMap {
 
         List<Map.Entry<ZoneKey, Double>> ranked = new ArrayList<>();
         for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
+            if (pinned.contains(entry.getKey())) {
+                continue;
+            }
             ZoneState state = entry.getValue();
             if (state == ZoneState.FROZEN) {
                 ranked.add(Map.entry(entry.getKey(), minDistanceToPlayers(entry.getKey(), playerXZ)));
@@ -117,7 +198,7 @@ public class ZoneDormancyMap {
         }
 
         List<Map.Entry<ZoneKey, Double>> dormant = zones.entrySet().stream()
-                .filter(e -> e.getValue() == ZoneState.DORMANT)
+                .filter(e -> e.getValue() == ZoneState.DORMANT && !pinned.contains(e.getKey()))
                 .map(e -> Map.entry(e.getKey(), minDistanceToPlayers(e.getKey(), playerXZ)))
                 .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
                 .limit(maxZones)

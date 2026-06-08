@@ -1,6 +1,7 @@
 package com.durkz.leancore.runtime;
 
 import com.durkz.leancore.LeanCorePlugin;
+import com.durkz.leancore.alert.CriticalWebhookNotifier;
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
@@ -14,6 +15,8 @@ import com.durkz.leancore.memory.PolicyApplier;
 import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
+import com.durkz.leancore.ui.HudSessionStore;
+import com.durkz.leancore.ui.MemoryHudService;
 import com.hypixel.hytale.server.core.universe.Universe;
 
 import java.util.concurrent.Executors;
@@ -31,6 +34,8 @@ public class MemoryRuntime {
     private final SessionModeDetector sessionDetector;
     private final LearningStore learningStore;
     private final MemoryGovernor governor;
+    private final MemoryHudService hudService;
+    private final CriticalWebhookNotifier webhookNotifier;
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -46,7 +51,9 @@ public class MemoryRuntime {
             BehaviorClassifier classifier,
             SessionModeDetector sessionDetector,
             LearningStore learningStore,
-            MemoryGovernor governor
+            MemoryGovernor governor,
+            MemoryHudService hudService,
+            CriticalWebhookNotifier webhookNotifier
     ) {
         this.plugin = plugin;
         this.config = config;
@@ -57,6 +64,8 @@ public class MemoryRuntime {
         this.sessionDetector = sessionDetector;
         this.learningStore = learningStore;
         this.governor = governor;
+        this.hudService = hudService;
+        this.webhookNotifier = webhookNotifier;
     }
 
     public static MemoryRuntime create(
@@ -71,6 +80,9 @@ public class MemoryRuntime {
         RetentionAllocator allocator = new RetentionAllocator(config);
         PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker(), classifier.features());
         MemoryGovernor governor = new MemoryGovernor(config, allocator, applier, zoneChunkUnloader, learningStore);
+        HudSessionStore hudSessions = new HudSessionStore(plugin.getDataDirectory());
+        MemoryHudService hudService = new MemoryHudService(config, hudSessions);
+        CriticalWebhookNotifier webhookNotifier = new CriticalWebhookNotifier(config);
         return new MemoryRuntime(
                 plugin,
                 config,
@@ -80,7 +92,9 @@ public class MemoryRuntime {
                 classifier,
                 new SessionModeDetector(config),
                 learningStore,
-                governor
+                governor,
+                hudService,
+                webhookNotifier
         );
     }
 
@@ -116,6 +130,12 @@ public class MemoryRuntime {
             return;
         }
         persistLearning();
+        if (hudService != null) {
+            hudService.sessions().save();
+        }
+        if (webhookNotifier != null) {
+            webhookNotifier.shutdown();
+        }
         ticker.shutdownNow();
         ticker = null;
     }
@@ -155,6 +175,12 @@ public class MemoryRuntime {
         learningStore.noteTier(sample.tier());
         learningStore.noteDemands(demands);
         governor.tick(sample, lastMode, demands, dormancyMap);
+        if (webhookNotifier != null) {
+            webhookNotifier.onTier(sample.tier(), sample.heapUsedRatio());
+        }
+        if (hudService != null) {
+            hudService.refresh(this);
+        }
     }
 
     public MemorySnapshot lastSample() {
@@ -184,5 +210,9 @@ public class MemoryRuntime {
 
     public GovernorStatus governorStatus() {
         return governor.status();
+    }
+
+    public MemoryHudService hudService() {
+        return hudService;
     }
 }

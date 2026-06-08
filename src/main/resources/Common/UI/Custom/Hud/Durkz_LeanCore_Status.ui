@@ -1,0 +1,14 @@
+Group #LeanCoreHudRoot {
+  Anchor: (Top: 10, Left: 10);
+  LayoutMode: Top;
+
+  Label #LcLine1 {
+    Text: "";
+    Style: (FontSize: 11, TextColor: #ffaa00(1));
+  }
+
+  Label #LcLine2 {
+    Text: "";
+    Style: (FontSize: 10, TextColor: #aaaaaa(1));
+  }
+}

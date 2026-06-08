@@ -45,6 +45,16 @@ public class LeanCoreConfig {
     public boolean learningEnabled = true;
     public int persistIntervalSeconds = 300;
 
+    public boolean hudFeatureEnabled = true;
+    public String[] hudViewerGroups = {"OP", "Admin"};
+    public String[] hudAdminGroups = {"OP", "Admin"};
+    public int hudUpdateIntervalSeconds = 3;
+    public int heatmapDefaultLimit = 24;
+    public int zonePinMaxCount = 16;
+
+    public String criticalWebhookUrl = "";
+    public int criticalWebhookCooldownSeconds = 300;
+
     public static LeanCoreConfig load(Path dataDirectory) {
         File directory = dataDirectory.toFile();
         if (!directory.exists()) {
@@ -89,6 +99,24 @@ public class LeanCoreConfig {
         }
         if (unloadMaxChunksPerSweep <= 0) {
             unloadMaxChunksPerSweep = 16;
+        }
+        if (hudUpdateIntervalSeconds <= 0) {
+            hudUpdateIntervalSeconds = 3;
+        }
+        if (heatmapDefaultLimit <= 0) {
+            heatmapDefaultLimit = 24;
+        }
+        if (zonePinMaxCount <= 0) {
+            zonePinMaxCount = 16;
+        }
+        if (criticalWebhookCooldownSeconds <= 0) {
+            criticalWebhookCooldownSeconds = 300;
+        }
+        if (hudViewerGroups == null || hudViewerGroups.length == 0) {
+            hudViewerGroups = new String[]{"OP", "Admin"};
+        }
+        if (hudAdminGroups == null || hudAdminGroups.length == 0) {
+            hudAdminGroups = new String[]{"OP", "Admin"};
         }
     }
 

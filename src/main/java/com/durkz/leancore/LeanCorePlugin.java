@@ -5,6 +5,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.BehaviorSignalSystems;
 import com.durkz.leancore.intelligence.LearningStore;
+import com.durkz.leancore.permissions.LeanCorePermissions;
 import com.durkz.leancore.runtime.MemoryRuntime;
 import com.hypixel.hytale.server.core.event.events.ShutdownEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent;
@@ -42,6 +43,7 @@ public class LeanCorePlugin extends JavaPlugin {
         super.setup();
 
         config = LeanCoreConfig.load(getDataDirectory());
+        LeanCorePermissions.register();
         LearningStore learning = new LearningStore(getDataDirectory(), config);
         BehaviorClassifier classifier = new BehaviorClassifier(learning);
 
@@ -52,6 +54,9 @@ public class LeanCorePlugin extends JavaPlugin {
         });
         getEventRegistry().registerGlobal(PlayerDisconnectEvent.class, e -> {
             if (e.getPlayerRef() != null) {
+                if (runtime != null && runtime.hudService() != null) {
+                    runtime.hudService().onDisconnect(e.getPlayerRef().getUuid());
+                }
                 classifier.forget(e.getPlayerRef().getUuid());
                 classifier.syncToStore(learning);
                 learning.flush();
