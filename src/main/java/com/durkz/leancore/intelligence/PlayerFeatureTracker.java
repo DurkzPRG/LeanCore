@@ -62,12 +62,13 @@ public class PlayerFeatureTracker implements ViewRadiusCache {
         }
     }
 
-    public void samplePositions(Collection<PlayerRef> online, long nowMs) {
+    public void samplePositions(Collection<PlayerRef> online, long nowMs, boolean spatialProbe) {
         for (PlayerFeatureState state : states.values()) {
             state.tick(nowMs);
         }
-        boolean sampleSpatial = lastSpatialSampleMs <= 0L
-                || nowMs - lastSpatialSampleMs >= PlayerFeatureState.SPATIAL_SAMPLE_INTERVAL_MS;
+        boolean sampleSpatial = spatialProbe
+                && (lastSpatialSampleMs <= 0L
+                || nowMs - lastSpatialSampleMs >= PlayerFeatureState.SPATIAL_SAMPLE_INTERVAL_MS);
         if (sampleSpatial) {
             lastSpatialSampleMs = nowMs;
         }

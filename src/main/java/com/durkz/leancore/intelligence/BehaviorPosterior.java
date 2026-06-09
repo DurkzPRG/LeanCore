@@ -14,10 +14,22 @@ public final class BehaviorPosterior {
         if (state == null) {
             return PlayerBehavior.UNKNOWN;
         }
+        PlayerBehavior recent = resolveRecent(state, nowMs);
+        if (recent != PlayerBehavior.UNKNOWN) {
+            return recent;
+        }
         if (model != null) {
             return model.topLabel(state, nowMs);
         }
         return topLabelFromActivityEmas(state, nowMs);
+    }
+
+    static PlayerBehavior resolveRecent(PlayerFeatureState state, long nowMs) {
+        if (state == null || state.idleSec(nowMs) >= 300L) {
+            return PlayerBehavior.UNKNOWN;
+        }
+        PlayerBehavior recent = state.recentDominantBehavior();
+        return recent == null ? PlayerBehavior.UNKNOWN : recent;
     }
 
     public static PlayerBehavior topLabelFromActivityEmas(PlayerFeatureState state, long nowMs) {

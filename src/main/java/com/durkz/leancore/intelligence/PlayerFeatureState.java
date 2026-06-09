@@ -9,6 +9,7 @@ public class PlayerFeatureState {
     static final double SIGNIFICANT_MOVE_BLOCKS = 2.0D;
     static final long HALF_LIFE_60S_MS = 60_000L;
     static final long HALF_LIFE_15M_MS = 15 * 60_000L;
+    static final long HALF_LIFE_ACTIVITY_MS = 20_000L;
     static final long SPATIAL_SAMPLE_INTERVAL_MS = 5_000L;
     private static final double CHUNK_BLEND_60 = blend(SPATIAL_SAMPLE_INTERVAL_MS, HALF_LIFE_60S_MS);
     private static final double CHUNK_BLEND_15M = blend(SPATIAL_SAMPLE_INTERVAL_MS, HALF_LIFE_15M_MS);
@@ -33,6 +34,8 @@ public class PlayerFeatureState {
     private double emaBuild60;
     private double emaCraft60;
     private double emaCombat60;
+
+    private final RecentActivityBuffer recentActivity = new RecentActivityBuffer();
 
     private long lastActivityMs;
     private long firstSeenMs;
@@ -121,6 +124,8 @@ public class PlayerFeatureState {
     }
 
     private void onActivity(ActionKind kind, boolean broken, boolean placed) {
+        long nowMs = System.currentTimeMillis();
+        tick(nowMs);
         if (broken) {
             emaBreaks60 += 1.0D;
             emaBreaks15m += 1.0D;
@@ -130,22 +135,46 @@ public class PlayerFeatureState {
             emaPlaces15m += 1.0D;
         }
         switch (kind) {
-            case MINE -> emaMine60 += 1.0D;
-            case CHOP -> emaWood60 += 1.0D;
-            case FARM -> emaFarm60 += 1.0D;
-            case BUILD -> emaBuild60 += 1.0D;
+            case MINE -> {
+                emaMine60 += 1.0D;
+                emaWood60 *= 0.72D;
+                emaBuild60 *= 0.85D;
+            }
+            case CHOP -> {
+                emaWood60 += 1.0D;
+                emaMine60 *= 0.72D;
+                emaBuild60 *= 0.85D;
+            }
+            case FARM -> {
+                emaFarm60 += 1.0D;
+                emaMine60 *= 0.85D;
+                emaWood60 *= 0.85D;
+            }
+            case BUILD -> {
+                emaBuild60 += 1.0D;
+                emaMine60 *= 0.85D;
+                emaWood60 *= 0.85D;
+            }
             case CRAFT -> emaCraft60 += 1.0D;
             case COMBAT -> emaCombat60 += 1.0D;
             default -> {
             }
         }
-        touch();
+        recentActivity.record(kind);
+        lastActivityMs = nowMs;
+    }
+
+    public PlayerBehavior recentDominantBehavior() {
+        PlayerBehavior recent = recentActivity.dominantBehavior(4, 0.55D);
+        return recent == null ? PlayerBehavior.UNKNOWN : recent;
     }
 
     public void onZoneDiscovered() {
+        long nowMs = System.currentTimeMillis();
+        tick(nowMs);
         emaZones60 += 1.0D;
         emaZones15m += 1.0D;
-        touch();
+        lastActivityMs = nowMs;
     }
 
     public void noteViewRadius(int serverRadius, int clientRadius) {
@@ -182,7 +211,7 @@ public class PlayerFeatureState {
             if (dist >= SIGNIFICANT_MOVE_BLOCKS) {
                 emaMovement60 += dist;
                 emaMovement15m += dist;
-                touch();
+                lastActivityMs = System.currentTimeMillis();
             }
         }
         lastX = x;
@@ -201,6 +230,7 @@ public class PlayerFeatureState {
         }
         double decay60 = decay(elapsedMs, HALF_LIFE_60S_MS);
         double decay15m = decay(elapsedMs, HALF_LIFE_15M_MS);
+        double decayActivity = decay(elapsedMs, HALF_LIFE_ACTIVITY_MS);
         emaMovement60 *= decay60;
         emaBreaks60 *= decay60;
         emaPlaces60 *= decay60;
@@ -209,12 +239,12 @@ public class PlayerFeatureState {
         emaBreaks15m *= decay15m;
         emaPlaces15m *= decay15m;
         emaZones15m *= decay15m;
-        emaMine60 *= decay60;
-        emaWood60 *= decay60;
-        emaFarm60 *= decay60;
-        emaBuild60 *= decay60;
-        emaCraft60 *= decay60;
-        emaCombat60 *= decay60;
+        emaMine60 *= decayActivity;
+        emaWood60 *= decayActivity;
+        emaFarm60 *= decayActivity;
+        emaBuild60 *= decayActivity;
+        emaCraft60 *= decayActivity;
+        emaCombat60 *= decayActivity;
         observedMs += elapsedMs;
         lastTickMs = nowMs;
     }
@@ -326,10 +356,6 @@ public class PlayerFeatureState {
 
     public double emaCombat60() {
         return emaCombat60;
-    }
-
-    private void touch() {
-        lastActivityMs = System.currentTimeMillis();
     }
 
     private static double decay(long elapsedMs, long halfLifeMs) {

@@ -276,7 +276,7 @@ public class MemoryRuntime {
                 lastDormancyRefreshMs
         )) {
             dormancyMap.refreshFromPlayers();
-            classifier.samplePositions(online, nowMs);
+            classifier.samplePositionsLite(online, nowMs);
             lastDormancyRefreshMs = nowMs;
             SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
             lastLiteX = motion.x();

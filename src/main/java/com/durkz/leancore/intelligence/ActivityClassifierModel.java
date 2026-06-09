@@ -53,6 +53,10 @@ public class ActivityClassifierModel {
         if (idleSec >= 300L) {
             return PlayerBehavior.AFK;
         }
+        PlayerBehavior recent = BehaviorPosterior.resolveRecent(state, nowMs);
+        if (recent != PlayerBehavior.UNKNOWN) {
+            return recent;
+        }
         double[] probs = posterior(state, nowMs);
         int best = -1;
         double bestScore = -1.0D;

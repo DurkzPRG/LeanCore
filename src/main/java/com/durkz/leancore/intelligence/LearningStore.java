@@ -37,6 +37,8 @@ public class LearningStore {
     private volatile double regionalPressure;
     private MemoryTier lastTier = MemoryTier.COMFORT;
     private int flushCount;
+    private volatile long stateGeneration;
+    private volatile long flushedGeneration;
 
     public LearningStore(Path dataDir, LeanCoreConfig config) {
         this.dataDir = dataDir;
@@ -114,6 +116,7 @@ public class LearningStore {
             }
             demandModel.onOutcome(entry.getKey(), state, entry.getValue().demand(), reward, nowMs);
         }
+        markDirty();
     }
 
     public void hydratePlayer(PlayerFeatureState state) {
@@ -127,6 +130,7 @@ public class LearningStore {
     public void savePlayerFeatures(PlayerFeatureState state) {
         PersistedPlayer prior = players.getOrDefault(state.playerId(), PersistedPlayer.empty());
         players.put(state.playerId(), prior.withFeatures(state));
+        markDirty();
     }
 
     public void noteDemands(Map<UUID, RetentionDemand> demands) {
@@ -135,6 +139,11 @@ public class LearningStore {
             RetentionDemand demand = e.getValue();
             players.put(e.getKey(), prior.withDemand(demand));
         }
+        markDirty();
+    }
+
+    public void markDirty() {
+        stateGeneration++;
     }
 
     public RetentionDemand demandFor(UUID playerId) {
@@ -191,10 +200,14 @@ public class LearningStore {
             return;
         }
         heapWindows.add(heapRatio, System.currentTimeMillis());
+        markDirty();
     }
 
     public void flush() {
         if (!config.learningEnabled) {
+            return;
+        }
+        if (stateGeneration == flushedGeneration) {
             return;
         }
         long now = System.currentTimeMillis();
@@ -235,6 +248,7 @@ public class LearningStore {
                 props.store(out, "LeanCore learning v4");
             }
             flushCount++;
+            flushedGeneration = stateGeneration;
         } catch (IOException ignored) {
         }
     }

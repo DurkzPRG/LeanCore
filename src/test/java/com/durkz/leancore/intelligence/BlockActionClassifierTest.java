@@ -31,4 +31,30 @@ class BlockActionClassifierTest {
         );
         assertEquals(ActionKind.CHOP, BlockActionClassifier.inferFromContext(ctx));
     }
+
+    @Test
+    void hatchetItemIdClassifiesChop() {
+        BlockActionContext ctx = new BlockActionContext(
+                ActionKind.UNKNOWN,
+                "hatchet",
+                "tool_hatchet_copper",
+                "",
+                "",
+                false
+        );
+        assertEquals(ActionKind.CHOP, BlockActionClassifier.inferFromContext(ctx));
+    }
+
+    @Test
+    void woodBlockClassifiesChopBeforeMineHeuristics() {
+        BlockActionContext ctx = new BlockActionContext(
+                ActionKind.UNKNOWN,
+                "",
+                "tool_pickaxe_copper",
+                "plant_oak_trunk",
+                "plant",
+                false
+        );
+        assertEquals(ActionKind.CHOP, BlockActionClassifier.inferFromContext(ctx));
+    }
 }

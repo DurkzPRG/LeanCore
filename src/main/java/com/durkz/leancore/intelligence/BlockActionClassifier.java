@@ -7,51 +7,52 @@ import com.hypixel.hytale.server.core.asset.type.item.config.ItemToolSpec;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Heuristic teacher for {@link ActivityClassifierModel} bootstrap (cold-start guardrail).
  */
 public final class BlockActionClassifier {
 
+    private static final ConcurrentHashMap<String, String> GATHER_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, BlockActionContext> BREAK_CLASSIFY_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, BlockActionContext> PLACE_CLASSIFY_CACHE = new ConcurrentHashMap<>();
+
     private BlockActionClassifier() {
     }
 
     public static BlockActionContext classifyBreak(ItemStack item, BlockType block) {
         String itemId = safeItemId(item);
-        String gather = resolveGatherType(item);
         String blockId = block != null ? safeLower(block.getId()) : "";
         String group = block != null ? safeLower(block.getGroup()) : "";
         boolean farm = isFarmBlock(block);
-
-        if (farm || matchesGather(gather, "hoe") || containsAny(itemId, "hoe")) {
-            return ctx(ActionKind.FARM, gather, itemId, blockId, group, true);
+        String cacheKey = breakCacheKey(itemId, blockId, group, farm);
+        BlockActionContext cached = BREAK_CLASSIFY_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
-        if (matchesGather(gather, "pickaxe", "pick", "hammer", "drill")
-                || containsAny(itemId, "pickaxe", "pick_", "hammer")
-                || isOreOrStone(blockId, group)) {
-            return ctx(ActionKind.MINE, gather, itemId, blockId, group, farm);
+        BlockActionContext resolved = classifyBreakUncached(item, itemId, blockId, group, farm);
+        if (resolved.kind() != ActionKind.UNKNOWN) {
+            BREAK_CLASSIFY_CACHE.put(cacheKey, resolved);
         }
-        if (matchesGather(gather, "axe", "hatchet")
-                || containsAny(itemId, "axe", "hatchet")
-                || isWood(blockId, group)) {
-            return ctx(ActionKind.CHOP, gather, itemId, blockId, group, farm);
-        }
-        if (matchesGather(gather, "shovel", "spade")
-                || containsAny(itemId, "shovel", "spade")
-                || isSoil(blockId, group)) {
-            return ctx(ActionKind.FARM, gather, itemId, blockId, group, true);
-        }
-        return ctx(ActionKind.UNKNOWN, gather, itemId, blockId, group, farm);
+        return resolved;
     }
 
     public static BlockActionContext classifyPlace(ItemStack item, BlockType block) {
         String itemId = safeItemId(item);
-        String gather = resolveGatherType(item);
         String blockId = block != null ? safeLower(block.getId()) : "";
         String group = block != null ? safeLower(block.getGroup()) : "";
         boolean farm = isFarmBlock(block);
+        String cacheKey = placeCacheKey(itemId, blockId, group, farm);
+        BlockActionContext cached = PLACE_CLASSIFY_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        String gather = resolveGatherType(item);
         ActionKind kind = farm ? ActionKind.FARM : ActionKind.BUILD;
-        return ctx(kind, gather, itemId, blockId, group, farm);
+        BlockActionContext resolved = ctx(kind, gather, itemId, blockId, group, farm);
+        PLACE_CLASSIFY_CACHE.put(cacheKey, resolved);
+        return resolved;
     }
 
     static ActionKind inferFromContext(BlockActionContext context) {
@@ -68,14 +69,15 @@ public final class BlockActionClassifier {
         if (context.farmBlock() || matchesGather(gather, "hoe") || containsAny(itemId, "hoe")) {
             return ActionKind.FARM;
         }
-        if (matchesGather(gather, "pickaxe", "pick", "hammer")
+        if (isWood(blockId, group)) {
+            return ActionKind.CHOP;
+        }
+        if (matchesMineGather(gather)
                 || containsAny(itemId, "pickaxe", "pick_", "hammer")
                 || isOreOrStone(blockId, group)) {
             return ActionKind.MINE;
         }
-        if (matchesGather(gather, "axe", "hatchet")
-                || containsAny(itemId, "axe", "hatchet")
-                || isWood(blockId, group)) {
+        if (matchesChopGather(gather) || isChopToolItem(itemId)) {
             return ActionKind.CHOP;
         }
         if (matchesGather(gather, "shovel", "spade")
@@ -84,6 +86,48 @@ public final class BlockActionClassifier {
             return ActionKind.FARM;
         }
         return ActionKind.UNKNOWN;
+    }
+
+    static int breakCacheSize() {
+        return BREAK_CLASSIFY_CACHE.size();
+    }
+
+    private static BlockActionContext classifyBreakUncached(
+            ItemStack item,
+            String itemId,
+            String blockId,
+            String group,
+            boolean farm
+    ) {
+        String gather = resolveGatherType(item);
+        if (farm || matchesGather(gather, "hoe") || containsAny(itemId, "hoe")) {
+            return ctx(ActionKind.FARM, gather, itemId, blockId, group, true);
+        }
+        if (isWood(blockId, group)) {
+            return ctx(ActionKind.CHOP, gather, itemId, blockId, group, farm);
+        }
+        if (matchesMineGather(gather)
+                || containsAny(itemId, "pickaxe", "pick_", "hammer")
+                || isOreOrStone(blockId, group)) {
+            return ctx(ActionKind.MINE, gather, itemId, blockId, group, farm);
+        }
+        if (matchesChopGather(gather) || isChopToolItem(itemId)) {
+            return ctx(ActionKind.CHOP, gather, itemId, blockId, group, farm);
+        }
+        if (matchesGather(gather, "shovel", "spade")
+                || containsAny(itemId, "shovel", "spade")
+                || isSoil(blockId, group)) {
+            return ctx(ActionKind.FARM, gather, itemId, blockId, group, true);
+        }
+        return ctx(ActionKind.UNKNOWN, gather, itemId, blockId, group, farm);
+    }
+
+    private static String breakCacheKey(String itemId, String blockId, String group, boolean farm) {
+        return itemId + '|' + blockId + '|' + group + '|' + (farm ? '1' : '0');
+    }
+
+    private static String placeCacheKey(String itemId, String blockId, String group, boolean farm) {
+        return itemId + '|' + blockId + '|' + group + '|' + (farm ? '1' : '0');
     }
 
     private static BlockActionContext ctx(
@@ -101,6 +145,13 @@ public final class BlockActionClassifier {
         if (item == null || item.isEmpty()) {
             return "";
         }
+        String itemId = safeItemId(item);
+        if (!itemId.isEmpty()) {
+            String cached = GATHER_CACHE.get(itemId);
+            if (cached != null) {
+                return cached;
+            }
+        }
         Item config = item.getItem();
         if (config == null) {
             return "";
@@ -113,16 +164,21 @@ public final class BlockActionClassifier {
         if (specs == null || specs.length == 0) {
             return "";
         }
+        String resolved = "";
         for (ItemToolSpec spec : specs) {
             if (spec == null) {
                 continue;
             }
             String gather = spec.getGatherType();
             if (gather != null && !gather.isBlank()) {
-                return safeLower(gather);
+                resolved = safeLower(gather);
+                break;
             }
         }
-        return "";
+        if (!itemId.isEmpty()) {
+            GATHER_CACHE.put(itemId, resolved);
+        }
+        return resolved;
     }
 
     private static boolean isFarmBlock(BlockType block) {
@@ -143,9 +199,42 @@ public final class BlockActionClassifier {
                 "silver", "gold", "mithril", "cobalt", "adamant", "sandstone", "granite", "basalt", "gravel");
     }
 
+    private static boolean matchesMineGather(String gather) {
+        return matchesGather(gather, "pickaxe", "pick", "hammer", "drill");
+    }
+
+    private static boolean matchesChopGather(String gather) {
+        if (gather == null || gather.isBlank() || gather.contains("pickaxe")) {
+            return false;
+        }
+        return matchesGather(gather, "hatchet", "chop", "wood", "lumber")
+                || (gather.contains("axe") && !gather.contains("pick"));
+    }
+
+    private static boolean isChopToolItem(String itemId) {
+        if (itemId == null || itemId.isEmpty()) {
+            return false;
+        }
+        String lower = safeLower(itemId);
+        if (lower.contains("pickaxe")) {
+            return false;
+        }
+        return lower.contains("hatchet")
+                || lower.contains("woodcut")
+                || lower.contains("lumber")
+                || lower.contains("_axe")
+                || lower.contains("axe_")
+                || lower.endsWith("_axe")
+                || lower.startsWith("axe_");
+    }
+
     private static boolean isWood(String blockId, String group) {
-        return containsAny(blockId, "wood", "log", "trunk", "bark", "leaf", "leaves", "plank", "lumber", "tree")
-                || containsAny(group, "wood", "log", "trunk", "bark", "leaf", "leaves", "plank", "lumber", "tree");
+        return containsAny(blockId, "wood", "log", "trunk", "bark", "leaf", "leaves", "plank", "lumber", "tree",
+                "branch", "timber", "sapling", "stump", "oak", "birch", "spruce", "cedar", "palm", "bamboo",
+                "vine", "moss", "stick", "reed", "forest", "plant")
+                || containsAny(group, "wood", "log", "trunk", "bark", "leaf", "leaves", "plank", "lumber", "tree",
+                "branch", "timber", "sapling", "stump", "oak", "birch", "spruce", "cedar", "palm", "bamboo",
+                "vine", "moss", "stick", "reed", "forest", "plant");
     }
 
     private static boolean isSoil(String blockId, String group) {
