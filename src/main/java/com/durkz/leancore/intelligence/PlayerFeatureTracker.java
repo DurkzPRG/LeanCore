@@ -34,16 +34,24 @@ public class PlayerFeatureTracker implements ViewRadiusCache {
         }
     }
 
-    public void onBlockBroken(PlayerRef ref) {
-        stateFor(ref).onBlockBroken();
+    public void onBlockBroken(PlayerRef ref, BlockActionContext context) {
+        stateFor(ref).onBlockBroken(context);
     }
 
-    public void onBlockPlaced(PlayerRef ref) {
-        stateFor(ref).onBlockPlaced();
+    public void onBlockPlaced(PlayerRef ref, BlockActionContext context) {
+        stateFor(ref).onBlockPlaced(context);
     }
 
     public void onZoneDiscovered(PlayerRef ref) {
         stateFor(ref).onZoneDiscovered();
+    }
+
+    public void onCraft(PlayerRef ref) {
+        stateFor(ref).onCraft();
+    }
+
+    public void onCombatHit(PlayerRef ref) {
+        stateFor(ref).onCombatHit();
     }
 
     @Override

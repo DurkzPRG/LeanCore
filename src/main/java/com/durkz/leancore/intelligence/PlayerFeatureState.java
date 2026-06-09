@@ -27,6 +27,12 @@ public class PlayerFeatureState {
     private double emaZones15m;
     private double emaChunks60;
     private double emaChunks15m;
+    private double emaMine60;
+    private double emaWood60;
+    private double emaFarm60;
+    private double emaBuild60;
+    private double emaCraft60;
+    private double emaCombat60;
 
     private long lastActivityMs;
     private long firstSeenMs;
@@ -63,6 +69,12 @@ public class PlayerFeatureState {
             double zones15m,
             double chunks60,
             double chunks15m,
+            double mine60,
+            double wood60,
+            double farm60,
+            double build60,
+            double craft60,
+            double combat60,
             long observedMs
     ) {
         this.emaMovement60 = movement60;
@@ -75,18 +87,58 @@ public class PlayerFeatureState {
         this.emaZones15m = zones15m;
         this.emaChunks60 = sanitizeChunkEma(chunks60);
         this.emaChunks15m = sanitizeChunkEma(chunks15m);
+        this.emaMine60 = mine60;
+        this.emaWood60 = wood60;
+        this.emaFarm60 = farm60;
+        this.emaBuild60 = build60;
+        this.emaCraft60 = craft60;
+        this.emaCombat60 = combat60;
         this.observedMs = Math.max(0L, observedMs);
     }
 
+    public void onBlockBroken(BlockActionContext context) {
+        onActivity(context != null ? context.kind() : ActionKind.UNKNOWN, true, false);
+    }
+
+    public void onBlockPlaced(BlockActionContext context) {
+        onActivity(context != null ? context.kind() : ActionKind.BUILD, false, true);
+    }
+
+    public void onCraft() {
+        onActivity(ActionKind.CRAFT, false, false);
+    }
+
+    public void onCombatHit() {
+        onActivity(ActionKind.COMBAT, false, false);
+    }
+
     public void onBlockBroken() {
-        emaBreaks60 += 1.0D;
-        emaBreaks15m += 1.0D;
-        touch();
+        onBlockBroken(BlockActionContext.unknown());
     }
 
     public void onBlockPlaced() {
-        emaPlaces60 += 1.0D;
-        emaPlaces15m += 1.0D;
+        onBlockPlaced(BlockActionContext.unknown());
+    }
+
+    private void onActivity(ActionKind kind, boolean broken, boolean placed) {
+        if (broken) {
+            emaBreaks60 += 1.0D;
+            emaBreaks15m += 1.0D;
+        }
+        if (placed) {
+            emaPlaces60 += 1.0D;
+            emaPlaces15m += 1.0D;
+        }
+        switch (kind) {
+            case MINE -> emaMine60 += 1.0D;
+            case CHOP -> emaWood60 += 1.0D;
+            case FARM -> emaFarm60 += 1.0D;
+            case BUILD -> emaBuild60 += 1.0D;
+            case CRAFT -> emaCraft60 += 1.0D;
+            case COMBAT -> emaCombat60 += 1.0D;
+            default -> {
+            }
+        }
         touch();
     }
 
@@ -157,6 +209,12 @@ public class PlayerFeatureState {
         emaBreaks15m *= decay15m;
         emaPlaces15m *= decay15m;
         emaZones15m *= decay15m;
+        emaMine60 *= decay60;
+        emaWood60 *= decay60;
+        emaFarm60 *= decay60;
+        emaBuild60 *= decay60;
+        emaCraft60 *= decay60;
+        emaCombat60 *= decay60;
         observedMs += elapsedMs;
         lastTickMs = nowMs;
     }
@@ -166,7 +224,13 @@ public class PlayerFeatureState {
                 + emaBreaks60 * 2.0D
                 + emaPlaces60 * 2.5D
                 + emaZones60 * 4.0D
-                + emaChunks60 * 0.08D;
+                + emaChunks60 * 0.08D
+                + emaMine60 * 1.5D
+                + emaWood60 * 1.5D
+                + emaFarm60 * 1.8D
+                + emaBuild60 * 2.0D
+                + emaCraft60 * 1.2D
+                + emaCombat60 * 2.2D;
         double longTerm = emaMovement15m * 0.002D
                 + emaBreaks15m * 0.15D
                 + emaPlaces15m * 0.18D
@@ -180,7 +244,20 @@ public class PlayerFeatureState {
     }
 
     public double confidence() {
-        return Math.min(1.0D, observedMs / 600_000D);
+        double timeFactor = Math.min(1.0D, observedMs / 600_000D);
+        double stability = featureStability();
+        return Math.min(1.0D, timeFactor * (0.45D + 0.55D * stability));
+    }
+
+    private double featureStability() {
+        double shortTerm = emaMovement60 + emaBreaks60 + emaPlaces60 + emaZones60 + emaChunks60 * 0.1D;
+        double longTerm = emaMovement15m + emaBreaks15m + emaPlaces15m + emaZones15m + emaChunks15m * 0.1D;
+        if (longTerm < 0.5D) {
+            return 0.25D;
+        }
+        double ratio = shortTerm / (longTerm + 0.01D);
+        double drift = Math.abs(Math.log(ratio + 0.01D));
+        return FeatureNormalizer.clamp01(1.0D - drift / 1.5D);
     }
 
     public double emaMovement60() {
@@ -225,6 +302,30 @@ public class PlayerFeatureState {
 
     public long observedSec() {
         return observedMs / 1000L;
+    }
+
+    public double emaMine60() {
+        return emaMine60;
+    }
+
+    public double emaWood60() {
+        return emaWood60;
+    }
+
+    public double emaFarm60() {
+        return emaFarm60;
+    }
+
+    public double emaBuild60() {
+        return emaBuild60;
+    }
+
+    public double emaCraft60() {
+        return emaCraft60;
+    }
+
+    public double emaCombat60() {
+        return emaCombat60;
     }
 
     private void touch() {

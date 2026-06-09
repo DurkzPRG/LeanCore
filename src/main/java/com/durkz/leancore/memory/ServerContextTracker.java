@@ -42,6 +42,10 @@ public class ServerContextTracker {
         }
     }
 
+    public MemoryTier resolveTierFixed(double heapRatio) {
+        return resolveFixed(heapRatio);
+    }
+
     public MemoryTier resolveTier(double heapRatio) {
         if (samples.size() < MIN_SAMPLES) {
             return resolveFixed(heapRatio);

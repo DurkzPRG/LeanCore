@@ -3,7 +3,7 @@ package com.durkz.leancore.intelligence;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-final class RollingHeapTracker {
+public final class RollingHeapTracker {
 
     private static final long WINDOW_60S_MS = 60_000L;
     private static final long WINDOW_15M_MS = 15 * 60_000L;
@@ -12,12 +12,12 @@ final class RollingHeapTracker {
 
     private final Deque<Sample> samples = new ArrayDeque<>();
 
-    void add(double heapRatio, long nowMs) {
+    public void add(double heapRatio, long nowMs) {
         samples.addLast(new Sample(heapRatio, nowMs));
         prune(nowMs);
     }
 
-    double avg60s(long nowMs) {
+    public double avg60s(long nowMs) {
         return avg(WINDOW_60S_MS, nowMs);
     }
 

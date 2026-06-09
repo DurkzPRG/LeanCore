@@ -15,9 +15,11 @@ import com.durkz.leancore.memory.PolicyApplier;
 import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
+import com.durkz.leancore.probe.RegionalPressureCache;
 import com.durkz.leancore.ui.HudSessionStore;
 import com.durkz.leancore.ui.MemoryHudService;
 import com.hypixel.hytale.server.core.HytaleServer;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 
 import java.util.concurrent.ScheduledFuture;
@@ -36,6 +38,7 @@ public class MemoryRuntime {
     private final MemoryGovernor governor;
     private final MemoryHudService hudService;
     private final CriticalWebhookNotifier webhookNotifier;
+    private final RegionalPressureCache regionalPressureCache = new RegionalPressureCache();
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -44,6 +47,10 @@ public class MemoryRuntime {
     private ScheduledFuture<?> tickFuture;
     private ScheduledFuture<?> persistFuture;
     private long lastDormancyRefreshMs;
+    private long lastLiteHeapSampleMs;
+    private double lastLiteX;
+    private double lastLiteZ;
+    private boolean lastLitePositioned;
 
     public MemoryRuntime(
             LeanCorePlugin plugin,
@@ -164,7 +171,10 @@ public class MemoryRuntime {
         } catch (Exception e) {
             plugin.getLogger().atWarning().withCause(e).log("tick failed");
         } finally {
-            scheduleTick(activeProfile.tickIntervalSeconds(config));
+            long delaySeconds = activeProfile == RuntimeProfile.LITE
+                    ? SoloRuntimePolicy.nextTickDelaySeconds(config, soloPlayerIdleSec())
+                    : activeProfile.tickIntervalSeconds(config);
+            scheduleTick(delaySeconds);
         }
     }
 
@@ -204,19 +214,24 @@ public class MemoryRuntime {
         long nowMs = System.currentTimeMillis();
         var online = Universe.get().getPlayers();
 
+        if (profile == RuntimeProfile.LITE) {
+            tickLite(online, nowMs);
+            return;
+        }
+
         long dormancyIntervalMs = dormancyIntervalMs(profile);
         if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= dormancyIntervalMs) {
             dormancyMap.refreshFromPlayers();
             lastDormancyRefreshMs = nowMs;
         }
 
+        regionalPressureCache.maybeSample(online, config.regionalPressureIntervalSeconds, nowMs);
+        learningStore.setRegionalPressure(regionalPressureCache.pressure());
+
         MemorySnapshot sample = sensor.sample();
         lastSample = sample;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
-
-        if (profile == RuntimeProfile.LITE) {
-            return;
-        }
+        learningStore.holdoutCohort().noteOnline(online, sample.heapUsedRatio(), nowMs);
 
         if (profile.tracksPlayerMotion()) {
             classifier.samplePositions(online, nowMs);
@@ -249,6 +264,49 @@ public class MemoryRuntime {
         if (profile.runsHud(config) && hudService != null) {
             hudService.refresh(this);
         }
+    }
+
+    private void tickLite(java.util.Collection<PlayerRef> online, long nowMs) {
+        if (SoloRuntimePolicy.shouldRefreshDormancy(
+                config,
+                lastLiteX,
+                lastLiteZ,
+                lastLitePositioned,
+                nowMs,
+                lastDormancyRefreshMs
+        )) {
+            dormancyMap.refreshFromPlayers();
+            classifier.samplePositions(online, nowMs);
+            lastDormancyRefreshMs = nowMs;
+            SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
+            lastLiteX = motion.x();
+            lastLiteZ = motion.z();
+            lastLitePositioned = motion.positioned();
+        }
+
+        if (SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {
+            MemorySnapshot sample = sensor.sample(false);
+            lastSample = sample;
+            lastLiteHeapSampleMs = nowMs;
+            lastMode = sessionDetector.detect(sample.onlinePlayers());
+        }
+    }
+
+    private long soloPlayerIdleSec() {
+        for (PlayerRef ref : Universe.get().getPlayers()) {
+            if (ref == null || !ref.isValid()) {
+                continue;
+            }
+            var features = classifier.features().snapshot().get(ref.getUuid());
+            if (features != null) {
+                return features.idleSec(System.currentTimeMillis());
+            }
+        }
+        return 0L;
+    }
+
+    public RegionalPressureCache regionalPressureCache() {
+        return regionalPressureCache;
     }
 
     private long dormancyIntervalMs(RuntimeProfile profile) {

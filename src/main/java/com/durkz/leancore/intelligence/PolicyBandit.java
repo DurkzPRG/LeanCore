@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class PolicyBandit {
 
-    public static final int CONTEXT_DIM = 6;
+    public static final int CONTEXT_DIM = 7;
     private static final double ALPHA = 0.6D;
     private static final double MIN_A = 0.05D;
     private static final double DEPRIORITIZE_PULLS = 8.0D;
@@ -26,10 +26,11 @@ public class PolicyBandit {
             double meanDemand,
             long secondsSinceChange,
             double heapBaseline,
+            double regionalPressure,
             GovernorPolicy current,
             java.util.function.Predicate<String> blacklisted
     ) {
-        double[] context = buildContext(sample, meanDemand, secondsSinceChange, pressureTier, heapBaseline);
+        double[] context = buildContext(sample, meanDemand, secondsSinceChange, pressureTier, heapBaseline, regionalPressure);
         GovernorPolicy best = null;
         double bestScore = Double.NEGATIVE_INFINITY;
 
@@ -112,7 +113,8 @@ public class PolicyBandit {
             double meanDemand,
             long secondsSinceChange,
             MemoryTier pressureTier,
-            double heapBaseline
+            double heapBaseline,
+            double regionalPressure
     ) {
         return new double[]{
                 sample.heapUsedRatio() - heapBaseline,
@@ -120,7 +122,8 @@ public class PolicyBandit {
                 Math.max(0.0D, Math.min(1.0D, meanDemand)),
                 Math.min(1.0D, sample.playerSpreadBlocks() / 1000.0D),
                 Math.min(1.0D, secondsSinceChange / 300.0D),
-                pressureTier.ordinal() / 3.0D
+                pressureTier.ordinal() / 3.0D,
+                Math.max(0.0D, Math.min(1.0D, regionalPressure))
         };
     }
 

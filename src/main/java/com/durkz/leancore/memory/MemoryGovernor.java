@@ -156,6 +156,7 @@ public class MemoryGovernor {
                 meanDemand,
                 elapsedSec,
                 learningStore.serverContext().q50(),
+                learningStore.regionalPressure(),
                 activePolicy,
                 this::isBlacklisted
         );
@@ -182,7 +183,8 @@ public class MemoryGovernor {
                 meanDemand(demands),
                 elapsedSec,
                 sample.tier(),
-                learningStore.serverContext().q50()
+                learningStore.serverContext().q50(),
+                learningStore.regionalPressure()
         );
         if (hasTreatmentCohort(demands)) {
             outcomeTracker.onPolicyApplied(

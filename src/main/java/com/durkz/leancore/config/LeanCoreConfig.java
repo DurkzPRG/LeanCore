@@ -22,6 +22,13 @@ public class LeanCoreConfig {
     public String localHostMode = "AUTO";
     public int runtimeInitialDelaySeconds = 30;
     public int soloTickIntervalSeconds = 30;
+    public int soloIdleTickIntervalSeconds = 60;
+    public int soloHeapSampleIntervalSeconds = 60;
+    public int soloDormancyMinIntervalSeconds = 30;
+    public double soloDormancyMotionBlocks = 8.0D;
+    public boolean soloAdaptiveTickEnabled = true;
+    public int soloIdleThresholdSeconds = 300;
+    public int regionalPressureIntervalSeconds = 60;
     public int friendsTickIntervalSeconds = 15;
     public boolean governEnabled = false;
     public boolean viewRadiusGovernanceEnabled = false;
@@ -106,6 +113,24 @@ public class LeanCoreConfig {
         }
         if (soloTickIntervalSeconds <= 0) {
             soloTickIntervalSeconds = 30;
+        }
+        if (soloIdleTickIntervalSeconds <= 0) {
+            soloIdleTickIntervalSeconds = 60;
+        }
+        if (soloHeapSampleIntervalSeconds <= 0) {
+            soloHeapSampleIntervalSeconds = 60;
+        }
+        if (soloDormancyMinIntervalSeconds <= 0) {
+            soloDormancyMinIntervalSeconds = 30;
+        }
+        if (soloDormancyMotionBlocks <= 0.0D) {
+            soloDormancyMotionBlocks = 8.0D;
+        }
+        if (soloIdleThresholdSeconds <= 0) {
+            soloIdleThresholdSeconds = 300;
+        }
+        if (regionalPressureIntervalSeconds <= 0) {
+            regionalPressureIntervalSeconds = 60;
         }
         if (friendsTickIntervalSeconds <= 0) {
             friendsTickIntervalSeconds = 15;

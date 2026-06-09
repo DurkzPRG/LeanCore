@@ -17,16 +17,24 @@ public class MemoryPressureSensor {
     }
 
     public MemorySnapshot sample() {
+        return sample(true);
+    }
+
+    public MemorySnapshot sample(boolean trackQuantiles) {
         Runtime rt = Runtime.getRuntime();
         long used = rt.totalMemory() - rt.freeMemory();
         long max = rt.maxMemory();
         double ratio = max <= 0L ? 0.0D : (double) used / max;
 
         long nowMs = System.currentTimeMillis();
-        serverContext.observe(ratio, nowMs);
+        if (trackQuantiles) {
+            serverContext.observe(ratio, nowMs);
+        }
 
         Collection<PlayerRef> players = Universe.get().getPlayers();
-        MemoryTier tier = serverContext.resolveTier(ratio);
+        MemoryTier tier = trackQuantiles
+                ? serverContext.resolveTier(ratio)
+                : serverContext.resolveTierFixed(ratio);
         return new MemorySnapshot(used, max, ratio, players.size(), maxPairwiseSpread(players), tier);
     }
 

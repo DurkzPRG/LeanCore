@@ -4,6 +4,7 @@ import com.durkz.leancore.command.LeanCoreCommand;
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.BehaviorSignalSystems;
+import com.durkz.leancore.intelligence.CombatSignalSystems;
 import com.durkz.leancore.intelligence.ChunkSignalSystems;
 import com.durkz.leancore.intelligence.LearningStore;
 import com.durkz.leancore.memory.MemoryPressureSensor;
@@ -98,6 +99,7 @@ public class LeanCorePlugin extends JavaPlugin {
         });
 
         BehaviorSignalSystems.register(getEntityStoreRegistry(), classifier);
+        CombatSignalSystems.register(getEntityStoreRegistry(), classifier);
         if (config.chunkUnloadEventTracking) {
             ChunkSignalSystems.register(getChunkStoreRegistry(), learning.unloadOutcomeTracker());
         }

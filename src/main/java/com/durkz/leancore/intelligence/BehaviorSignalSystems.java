@@ -9,6 +9,7 @@ import com.hypixel.hytale.component.query.Query;
 import com.hypixel.hytale.component.system.EntityEventSystem;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
 import com.hypixel.hytale.server.core.event.events.ecs.BreakBlockEvent;
+import com.hypixel.hytale.server.core.event.events.ecs.CraftRecipeEvent;
 import com.hypixel.hytale.server.core.event.events.ecs.DiscoverZoneEvent;
 import com.hypixel.hytale.server.core.event.events.ecs.PlaceBlockEvent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -23,10 +24,10 @@ public final class BehaviorSignalSystems {
     }
 
     public static void register(ComponentRegistryProxy<EntityStore> registry, BehaviorClassifier classifier) {
-        // Break/place/discover are ECS events — global EventRegistry does not carry the entity ref.
         registry.registerSystem(new OnBreak(classifier));
         registry.registerSystem(new OnPlace(classifier));
         registry.registerSystem(new OnDiscover(classifier));
+        registry.registerSystem(new OnCraft(classifier));
     }
 
     private static PlayerRef resolvePlayer(Store<EntityStore> store, Ref<EntityStore> ref) {
@@ -55,9 +56,11 @@ public final class BehaviorSignalSystems {
         public void handle(int index, ArchetypeChunk<EntityStore> chunk, Store<EntityStore> store,
                            CommandBuffer<EntityStore> buf, BreakBlockEvent event) {
             PlayerRef ref = resolvePlayer(store, chunk.getReferenceTo(index));
-            if (ref != null) {
-                classifier.onBlockBroken(ref);
+            if (ref == null) {
+                return;
             }
+            BlockActionContext context = BlockActionContext.fromBreak(event.getItemInHand(), event.getBlockType());
+            classifier.onBlockBroken(ref, context);
         }
     }
 
@@ -78,9 +81,11 @@ public final class BehaviorSignalSystems {
         public void handle(int index, ArchetypeChunk<EntityStore> chunk, Store<EntityStore> store,
                            CommandBuffer<EntityStore> buf, PlaceBlockEvent event) {
             PlayerRef ref = resolvePlayer(store, chunk.getReferenceTo(index));
-            if (ref != null) {
-                classifier.onBlockPlaced(ref);
+            if (ref == null) {
+                return;
             }
+            BlockActionContext context = BlockActionContext.fromPlace(event.getItemInHand(), null);
+            classifier.onBlockPlaced(ref, context);
         }
     }
 
@@ -103,6 +108,29 @@ public final class BehaviorSignalSystems {
             PlayerRef ref = resolvePlayer(store, chunk.getReferenceTo(index));
             if (ref != null) {
                 classifier.onZoneDiscovered(ref);
+            }
+        }
+    }
+
+    private static final class OnCraft extends EntityEventSystem<EntityStore, CraftRecipeEvent.Pre> {
+        private final BehaviorClassifier classifier;
+
+        OnCraft(BehaviorClassifier classifier) {
+            super(CraftRecipeEvent.Pre.class);
+            this.classifier = classifier;
+        }
+
+        @Override
+        public Query<EntityStore> getQuery() {
+            return Query.any();
+        }
+
+        @Override
+        public void handle(int index, ArchetypeChunk<EntityStore> chunk, Store<EntityStore> store,
+                           CommandBuffer<EntityStore> buf, CraftRecipeEvent.Pre event) {
+            PlayerRef ref = resolvePlayer(store, chunk.getReferenceTo(index));
+            if (ref != null) {
+                classifier.onCraft(ref);
             }
         }
     }
