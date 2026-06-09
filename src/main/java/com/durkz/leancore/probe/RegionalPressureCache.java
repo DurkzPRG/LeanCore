@@ -6,6 +6,9 @@ import com.hypixel.hytale.server.core.universe.world.World;
 
 import java.util.Collection;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Throttled S4 regional entity pressure for bandit context (not probe-only).
@@ -45,7 +48,7 @@ public final class RegionalPressureCache {
             if (world == null) {
                 continue;
             }
-            RegionalEntityProbe.RegionalEntitySample sample = RegionalEntityProbe.read(ref, world);
+            RegionalEntityProbe.RegionalEntitySample sample = readOnWorldThread(world, ref);
             if (sample.zone() == null) {
                 continue;
             }
@@ -72,6 +75,25 @@ public final class RegionalPressureCache {
                 "regionalPressure=%.2f entities=%d",
                 lastPressure,
                 lastRegionalEntities);
+    }
+
+    private static RegionalEntityProbe.RegionalEntitySample readOnWorldThread(World world, PlayerRef ref) {
+        CompletableFuture<RegionalEntityProbe.RegionalEntitySample> result = new CompletableFuture<>();
+        world.execute(() -> {
+            try {
+                result.complete(RegionalEntityProbe.read(ref, world));
+            } catch (Exception e) {
+                result.completeExceptionally(e);
+            }
+        });
+        try {
+            return result.get(2L, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            result.cancel(true);
+            return RegionalEntityProbe.RegionalEntitySample.empty();
+        } catch (Exception e) {
+            return RegionalEntityProbe.RegionalEntitySample.empty();
+        }
     }
 
     private static World resolveWorld(PlayerRef ref) {
