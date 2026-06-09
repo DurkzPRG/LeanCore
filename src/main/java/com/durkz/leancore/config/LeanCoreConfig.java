@@ -36,6 +36,8 @@ public class LeanCoreConfig {
     public boolean viewRadiusGovernanceEnabled = false;
     public String preset = "AUTO";
     public boolean dedicatedServerMode = false;
+    public boolean dedicatedBootstrapEnabled = true;
+    public boolean dedicatedBootstrapApplied = false;
     public int friendsMaxPlayers = 8;
     public int serverDensePlayerThreshold = 9;
 

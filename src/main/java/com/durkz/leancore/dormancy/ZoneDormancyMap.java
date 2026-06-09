@@ -9,7 +9,7 @@ import com.hypixel.hytale.server.core.universe.Universe;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,9 +28,61 @@ public class ZoneDormancyMap {
     }
 
     public void refreshFromPlayers() {
-        long now = System.currentTimeMillis();
-        Map<ZoneKey, ZoneState> next = new HashMap<>();
+        refreshFromPlayerZones(collectHotPlayerZones(), System.currentTimeMillis());
+    }
 
+    void refreshFromPlayerZones(Collection<ZoneKey> hotZones, long now) {
+        Set<ZoneKey> hotNow = new HashSet<>(hotZones);
+        for (ZoneKey key : hotNow) {
+            zones.put(key, ZoneState.HOT);
+            lastHotAtMs.put(key, now);
+        }
+
+        for (Map.Entry<ZoneKey, Long> entry : lastHotAtMs.entrySet()) {
+            ZoneKey key = entry.getKey();
+            if (hotNow.contains(key) || pinned.contains(key)) {
+                continue;
+            }
+            long idleMin = (now - entry.getValue()) / 60_000L;
+            zones.put(key, idleStateForMinutes(idleMin));
+        }
+
+        for (ZoneKey key : pinned) {
+            zones.put(key, ZoneState.HOT);
+            lastHotAtMs.put(key, now);
+        }
+
+        pruneStaleZones(now);
+    }
+
+    ZoneState idleStateForMinutes(long idleMin) {
+        if (idleMin >= config.frozenAfterMinutes) {
+            return ZoneState.FROZEN;
+        }
+        if (idleMin >= config.dormantAfterMinutes) {
+            return ZoneState.DORMANT;
+        }
+        return ZoneState.WARM;
+    }
+
+    private void pruneStaleZones(long now) {
+        long pruneAfterMs = Math.max(1, config.frozenAfterMinutes) * 2L * 60_000L;
+        long cutoff = now - pruneAfterMs;
+        lastHotAtMs.entrySet().removeIf(entry -> {
+            ZoneKey key = entry.getKey();
+            if (pinned.contains(key)) {
+                return false;
+            }
+            if (entry.getValue() >= cutoff) {
+                return false;
+            }
+            zones.remove(key);
+            return true;
+        });
+    }
+
+    private static Collection<ZoneKey> collectHotPlayerZones() {
+        List<ZoneKey> hot = new ArrayList<>();
         for (PlayerRef ref : Universe.get().getPlayers()) {
             if (!ref.isValid()) {
                 continue;
@@ -39,35 +91,9 @@ public class ZoneDormancyMap {
             if (t == null || t.getPosition() == null) {
                 continue;
             }
-            ZoneKey key = ZoneKey.fromBlockCoords(ref.getWorldUuid(), t.getPosition().x, t.getPosition().z);
-            next.put(key, ZoneState.HOT);
-            lastHotAtMs.put(key, now);
+            hot.add(ZoneKey.fromBlockCoords(ref.getWorldUuid(), t.getPosition().x, t.getPosition().z));
         }
-
-        for (Map.Entry<ZoneKey, Long> entry : lastHotAtMs.entrySet()) {
-            ZoneKey key = entry.getKey();
-            if (next.containsKey(key) || pinned.contains(key)) {
-                continue;
-            }
-            long idleMin = (now - entry.getValue()) / 60_000L;
-            ZoneState state;
-            if (idleMin >= config.frozenAfterMinutes) {
-                state = ZoneState.FROZEN;
-            } else if (idleMin >= config.dormantAfterMinutes) {
-                state = ZoneState.DORMANT;
-            } else {
-                state = ZoneState.WARM;
-            }
-            next.put(key, state);
-        }
-
-        for (ZoneKey key : pinned) {
-            next.put(key, ZoneState.HOT);
-            lastHotAtMs.put(key, now);
-        }
-
-        zones.clear();
-        zones.putAll(next);
+        return hot;
     }
 
     public ZoneState stateOf(ZoneKey key) {

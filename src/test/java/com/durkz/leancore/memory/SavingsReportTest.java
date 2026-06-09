@@ -27,6 +27,7 @@ class SavingsReportTest {
                 config,
                 RuntimeProfile.FULL,
                 new UnloadOutcomeTracker(),
+                0L,
                 now + 2000L
         ));
 
@@ -69,6 +70,7 @@ class SavingsReportTest {
                 config,
                 RuntimeProfile.FULL,
                 new UnloadOutcomeTracker(),
+                0L,
                 now + 5000L
         ));
 

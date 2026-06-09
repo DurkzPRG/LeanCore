@@ -197,6 +197,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     plugin.config(),
                     rt.activeProfile(),
                     rt.learningStore().unloadOutcomeTracker(),
+                    rt.viewRadiusGraceUntilMs(),
                     nowMs
             )) {
                 say(ctx, line.text(), line.color());

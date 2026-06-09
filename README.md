@@ -73,6 +73,7 @@ File: `mods/durkz_LeanCore/data/LeanCore.json`
 | `learningEnabled` | `false` | Policy learning + disk persistence |
 | `persistIntervalSeconds` | `300` | Learning flush interval |
 | `dedicatedServerMode` | `false` | Force FULL profile |
+| `dedicatedBootstrapEnabled` | `true` | One-time preset on first dedicated boot: enables govern, view-radius, learning |
 
 Learning snapshot: `mods/durkz_LeanCore/data/learning.state` (schema v5)
 

@@ -23,6 +23,7 @@ public final class SavingsReport {
             LeanCoreConfig config,
             RuntimeProfile profile,
             UnloadOutcomeTracker unloadTracker,
+            long viewRadiusGraceUntilMs,
             long nowMs
     ) {
         List<Line> lines = new ArrayList<>();
@@ -114,6 +115,14 @@ public final class SavingsReport {
                 config.viewRadiusGovernanceEnabled,
                 config.learningEnabled,
                 config.unloadEnabled), "#888888"));
+        if (config.dedicatedBootstrapApplied) {
+            lines.add(new Line("dedicatedBootstrap=applied (one-time preset on first dedicated boot)", "#888888"));
+        }
+        if (viewRadiusGraceUntilMs > 0L && nowMs < viewRadiusGraceUntilMs) {
+            lines.add(new Line(String.format(Locale.ROOT,
+                    "view-radius grace: cuts blocked for %s more",
+                    formatDuration(viewRadiusGraceUntilMs - nowMs)), "#FFAA00"));
+        }
 
         lines.add(new Line("--- Session actions (cumulative) ---", "#888888"));
         lines.add(new Line(String.format(Locale.ROOT,

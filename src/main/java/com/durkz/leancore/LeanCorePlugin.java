@@ -1,6 +1,7 @@
 package com.durkz.leancore;
 
 import com.durkz.leancore.command.LeanCoreCommand;
+import com.durkz.leancore.config.DedicatedBootstrap;
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.BehaviorSignalSystems;
@@ -64,6 +65,12 @@ public class LeanCorePlugin extends JavaPlugin {
         super.setup();
 
         config = LeanCoreConfig.load(getDataDirectory());
+        if (DedicatedBootstrap.applyIfNeeded(config)) {
+            getLogger().atInfo().log(
+                    "Dedicated bootstrap applied — governEnabled, viewRadiusGovernanceEnabled, "
+                            + "learningEnabled (unloadEnabled stays false)"
+            );
+        }
         LeanCorePermissions.register();
         getCommandRegistry().registerCommand(new LeanCoreCommand());
 

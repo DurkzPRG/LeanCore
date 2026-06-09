@@ -2,6 +2,7 @@ package com.durkz.leancore.runtime;
 
 import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.alert.CriticalWebhookNotifier;
+import com.durkz.leancore.config.DedicatedBootstrap;
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
@@ -124,6 +125,9 @@ public class MemoryRuntime {
         long initialDelay = Math.max(0, config.runtimeInitialDelaySeconds);
         scheduleTick(initialDelay);
         schedulePersistIfNeeded();
+        if (config.dedicatedServerMode && config.viewRadiusGovernanceEnabled) {
+            governor.setViewRadiusGraceUntilMs(System.currentTimeMillis() + DedicatedBootstrap.VIEW_RADIUS_GRACE_MS);
+        }
         plugin.getLogger().atInfo().log(
                 "Runtime started profile=%s initialDelay=%ds tick=%ds",
                 activeProfile,
@@ -371,6 +375,10 @@ public class MemoryRuntime {
 
     public GovernorStatus governorStatus() {
         return governor.status();
+    }
+
+    public long viewRadiusGraceUntilMs() {
+        return governor.viewRadiusGraceUntilMs();
     }
 
     public MemoryHudService hudService() {

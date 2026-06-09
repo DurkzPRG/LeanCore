@@ -32,6 +32,7 @@ public class MemoryGovernor {
     private double heapAtChange;
     private boolean rolledBack;
     private double[] contextAtChange;
+    private volatile long viewRadiusGraceUntilMs;
 
     private volatile GovernorStatus lastStatus = GovernorStatus.idle();
 
@@ -106,6 +107,18 @@ public class MemoryGovernor {
 
     public GovernorStatus status() {
         return lastStatus;
+    }
+
+    public void setViewRadiusGraceUntilMs(long untilMs) {
+        viewRadiusGraceUntilMs = Math.max(0L, untilMs);
+    }
+
+    public long viewRadiusGraceUntilMs() {
+        return viewRadiusGraceUntilMs;
+    }
+
+    public boolean viewRadiusGraceActive(long nowMs) {
+        return viewRadiusGraceUntilMs > 0L && nowMs < viewRadiusGraceUntilMs;
     }
 
     private void checkRollback(MemorySnapshot sample) {
@@ -221,6 +234,9 @@ public class MemoryGovernor {
 
     private boolean shouldApplyViewRadius(MemorySnapshot sample) {
         if (!config.viewRadiusGovernanceEnabled) {
+            return false;
+        }
+        if (viewRadiusGraceActive(System.currentTimeMillis())) {
             return false;
         }
         if (!config.dedicatedServerMode && sample.onlinePlayers() <= 1) {
