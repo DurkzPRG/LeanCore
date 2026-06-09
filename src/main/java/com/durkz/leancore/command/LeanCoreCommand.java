@@ -5,6 +5,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneHeatmapEntry;
 import com.durkz.leancore.dormancy.ZoneKey;
 import com.durkz.leancore.dormancy.ZoneState;
+import com.durkz.leancore.intelligence.BehaviorPosterior;
 import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.permissions.LeanCorePermissions;
 import com.durkz.leancore.intelligence.PlayerFeatureState;
@@ -104,6 +105,10 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     + " | profile " + rt.activeProfile()
                     + " | " + rt.lastMode()
                     + " | " + sample.onlinePlayers() + " online", "#FFAA00");
+            if (rt.activeProfile() == com.durkz.leancore.runtime.RuntimeProfile.LITE) {
+                say(ctx, "solo=LITE motion-gated dormancy adaptiveTick="
+                        + plugin.config().soloAdaptiveTickEnabled, "#888888");
+            }
             say(ctx, "tier " + sample.tier() + " | spread " + (int) sample.playerSpreadBlocks() + " blocks", "#AAAAAA");
             var gov = rt.governorStatus();
             if (gov.enabled() && gov.policy() != null) {
@@ -207,6 +212,8 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             say(ctx, rt.learningStore().windowLine(), "#888888");
             say(ctx, rt.learningStore().serverLine(), "#888888");
             say(ctx, rt.learningStore().policyBandit().topArmLine(), "#AAAAAA");
+            say(ctx, rt.learningStore().holdoutStatusLine(), "#AAAAAA");
+            say(ctx, rt.regionalPressureCache().statusLine(), "#888888");
             say(ctx, "holdout=10% skips view-radius cuts; bandit learns from treatment cohort only", "#888888");
         }
     }
@@ -249,6 +256,16 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     features.idleSec(nowMs),
                     features.observedSec(),
                     HoldoutSet.isHoldout(playerRef.getUuid())), "#AAAAAA");
+            say(ctx, BehaviorPosterior.formatTopThree(features, rt.learningStore().activityClassifier(), nowMs), "#888888");
+            say(ctx, rt.learningStore().activityClassifier().statusLine(features, nowMs), "#888888");
+            say(ctx, String.format(Locale.ROOT,
+                    "activity mine=%.1f wood=%.1f farm=%.1f build=%.1f craft=%.1f combat=%.1f",
+                    features.emaMine60(),
+                    features.emaWood60(),
+                    features.emaFarm60(),
+                    features.emaBuild60(),
+                    features.emaCraft60(),
+                    features.emaCombat60()), "#AAAAAA");
         }
     }
 

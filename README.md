@@ -19,23 +19,24 @@ On **embedded local worlds**, it runs a **light profile** (dormancy + heap tier)
 - A **memory governor** (optional) that reads heap pressure and applies tiered policies
 - **Spatial dormancy**: inactive map regions cool down (WARM → DORMANT → FROZEN)
 - **Per-player demand**: explorers and builders weighted by live activity and a learned demand model
+- **Activity Sense (1.2)**: online ML classifier for mining, chopping, farming, building, crafting, and combat
 - **Scaled runtime**: `LITE` solo → `STANDARD` friends → `FULL` dedicated
 - **Staff diagnostics**: commands, heatmap, optional admin HUD
 
 ---
 
-## Embedded host profiles (1.1)
+## Embedded host profiles (1.2.0)
 
 | Players | Profile | Tick | What runs |
 |---------|---------|------|-----------|
-| 1 (solo local) | `LITE` | 30s | Dormancy map + heap tier |
+| 1 (solo local) | `LITE` | 30s (60s idle) | Motion-gated dormancy + throttled heap tier |
 | 2–8 (friends) | `STANDARD` | 15s | + classifier; govern/learning/HUD if enabled in config |
 | 9+ (dense local) | `FULL` | 5s | Full runtime per config |
 | Dedicated JVM | `FULL` | 5s | Full runtime per config |
 
 Config: `localHostMode: "AUTO"` (default). Use `"PASSIVE"` to disable background runtime entirely. Set `dedicatedServerMode: true` on a dedicated JVM host.
 
-Boot log (solo): `LeanCore 1.1.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE`. Friend joins → `profile LITE -> STANDARD`.
+Boot log (solo): `LeanCore 1.2.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE`. Friend joins → `profile LITE -> STANDARD`.
 
 View-radius governance never applies on embedded solo (1 player + not dedicated).
 
@@ -52,10 +53,14 @@ View-radius governance never applies on embedded solo (1 player + not dedicated)
 | **Policy applier** | Throttled view-radius adjustments on **dedicated** hosts when enabled |
 | **Chunk unload** | Removes chunks in frozen/dormant zones when tiers require it |
 | **Learning store** | Rolling heap windows (60s / 15m / 24h), policy bandit, false-cut tracking; persists across restarts |
-| **Demand model (1.1)** | `OnlineLinearDemandModel`, feature schema v1 |
+| **Demand model** | `OnlineLinearDemandModel`, feature schema **v2** (`demandDim=11`) |
+| **Activity Sense (1.2)** | Online softmax classifier: MINER, LUMBERJACK, FARMER, BUILDER, FIGHTER, EXPLORER |
+| **Block context** | Pickaxe on ore → mine; axe on wood → chop; combat from damage events only |
 | **Regional probe** | S4 entity counts per zone in `/leancore probe` |
 | **Unload counters** | Policy sweeps vs engine unloads in `/leancore learn` |
-| **Holdout (10%)** | Bandit learns on treatment players; holdout skips view-radius cuts |
+| **Holdout (10%)** | Bandit learns on treatment players; holdout skips view-radius cuts; cohort heap in `/leancore learn` |
+| **Behavior posterior** | Soft playstyle scores from ML + activity EMAs (see `/leancore learn player`) |
+| **S4 in bandit** | Regional entity pressure in policy context (throttled sample) |
 | **Presets** | AUTO → SOLO_LEAN, FRIENDS_NIGHT, or SERVER_DENSE from online player count |
 | **Admin HUD** | `/leancore hud on` — compact heap/tier overlay (**off by default**) |
 | **Heatmap** | `/leancore heatmap [limit]` — zone state summary for staff |
@@ -68,11 +73,12 @@ View-radius governance never applies on embedded solo (1 player + not dedicated)
 
 ## Installation
 
-1. Download **LeanCore-1.1.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+1. Download **LeanCore-1.2.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Place the JAR in your world's **`mods/`** folder
 3. Start — config is created at **`mods/durkz_LeanCore/data/LeanCore.json`**
 4. Solo boot log should show `localHostMode=AUTO` and `Runtime started profile=LITE`
 5. Run `/leancore status` after ~1 minute
+6. Mine with a pickaxe, then `/leancore learn player` — expect `MINER` in posterior, not `FIGHTER`
 
 **Singleplayer / local host:** default `localHostMode: "AUTO"` keeps overhead low. Grant HUD/admin via `hudViewerGroups` / `hudAdminGroups` or `/perm`.
 
@@ -88,7 +94,7 @@ Main command: **`/leancore`**
 | `/leancore memory` | Everyone | Heap snapshot, tier, footprint, unload stats |
 | `/leancore zones` | Everyone | Dormancy map counters |
 | `/leancore learn` | Everyone | Learning diagnostics (bandit, quantiles, demand model, unload stats) |
-| `/leancore learn player` | Everyone | Your per-player demand features and holdout cohort |
+| `/leancore learn player` | Everyone | Demand features, ML posterior, activity EMAs, holdout cohort |
 | `/leancore probe` | Everyone | API capability probe (S1–S5), including regional S4 entity counts |
 | `/leancore hud on\|off\|status` | HUD viewers | Opt-in memory HUD overlay |
 | `/leancore heatmap [limit]` | Staff | Zone heatmap |
@@ -118,6 +124,11 @@ Main command: **`/leancore`**
 | `localHostMode` | `AUTO` | `AUTO`, `PASSIVE`, or `FULL` on embedded host |
 | `runtimeInitialDelaySeconds` | `30` | Delay before first background tick |
 | `soloTickIntervalSeconds` | `30` | LITE profile interval (1 player) |
+| `soloIdleTickIntervalSeconds` | `60` | LITE tick when idle (adaptive) |
+| `soloHeapSampleIntervalSeconds` | `60` | LITE heap/tier sample interval |
+| `soloDormancyMotionBlocks` | `8` | Min movement before dormancy rebuild |
+| `soloAdaptiveTickEnabled` | `true` | Stretch tick when solo player idle |
+| `regionalPressureIntervalSeconds` | `60` | S4 bandit context sample interval |
 | `friendsTickIntervalSeconds` | `15` | STANDARD profile interval (2+ players) |
 | `governEnabled` | `false` | Apply governor policies (enable on dedicated after baseline) |
 | `viewRadiusGovernanceEnabled` | `false` | Server view-radius cuts (dedicated only; never solo embedded) |
@@ -144,7 +155,7 @@ Main command: **`/leancore`**
 
 **Other data files:**
 
-- `mods/durkz_LeanCore/data/learning.state` — learning snapshot (schema v3)
+- `mods/durkz_LeanCore/data/learning.state` — learning snapshot (schema **v4**)
 - `mods/durkz_LeanCore/data/hud.state` — per-player HUD toggles
 
 LeanCore uses **permission nodes** and/or **config group lists**. Either path grants access.
@@ -182,11 +193,12 @@ Primary KPI is **server JVM heap**, not client FPS.
 
 ### Verifying it works
 
-1. Boot log: `LeanCore 1.1.0 setup (localHostMode=AUTO).` and `profile=LITE` on solo
+1. Boot log: `LeanCore 1.2.0 setup (localHostMode=AUTO).` and `profile=LITE` on solo
 2. `/leancore status` — profile, tier, player count
 3. Friend joins → log `profile LITE -> STANDARD`
-4. `/leancore learn` — `featureSchema=v1` after several minutes (if `learningEnabled`)
-5. Dedicated: `dedicatedServerMode: true` → `profile=FULL`
+4. Mine ore with pickaxe → `/leancore learn player` shows `posterior=MINER …` and `activityModel=SOFTMAX`
+5. `/leancore learn` — `featureSchema=v2` after several minutes (if `learningEnabled`)
+6. Dedicated: `dedicatedServerMode: true` → `profile=FULL`
 
 ---
 
@@ -210,7 +222,7 @@ Requirements: JDK compatible with your Hytale mod toolchain, Gradle wrapper incl
 ./gradlew build
 ```
 
-Output JAR: `build/libs/LeanCore-1.1.0.jar`
+Output JAR: `build/libs/LeanCore-1.2.0.jar`
 
 ---
 

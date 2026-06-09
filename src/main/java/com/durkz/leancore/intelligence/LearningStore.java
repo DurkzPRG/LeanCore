@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class LearningStore {
 
-    static final int SCHEMA_VERSION = 3;
+    static final int SCHEMA_VERSION = 4;
     private static final String STATE_FILE = "learning.state";
 
     private final Path dataDir;
@@ -30,8 +30,11 @@ public class LearningStore {
     private final FalseCutTracker falseCutTracker;
     private final OutcomeTracker outcomeTracker;
     private final OnlineLinearDemandModel demandModel;
+    private final ActivityClassifierModel activityClassifier;
     private final UnloadOutcomeTracker unloadOutcomeTracker;
+    private final HoldoutCohortTracker holdoutCohort = new HoldoutCohortTracker();
 
+    private volatile double regionalPressure;
     private MemoryTier lastTier = MemoryTier.COMFORT;
     private int flushCount;
 
@@ -43,6 +46,7 @@ public class LearningStore {
         this.falseCutTracker = new FalseCutTracker();
         this.outcomeTracker = new OutcomeTracker(policyBandit, falseCutTracker);
         this.demandModel = new OnlineLinearDemandModel();
+        this.activityClassifier = new ActivityClassifierModel();
         this.unloadOutcomeTracker = new UnloadOutcomeTracker();
         load();
     }
@@ -71,8 +75,24 @@ public class LearningStore {
         return demandModel;
     }
 
+    public ActivityClassifierModel activityClassifier() {
+        return activityClassifier;
+    }
+
     public UnloadOutcomeTracker unloadOutcomeTracker() {
         return unloadOutcomeTracker;
+    }
+
+    public HoldoutCohortTracker holdoutCohort() {
+        return holdoutCohort;
+    }
+
+    public void setRegionalPressure(double pressure) {
+        regionalPressure = Math.max(0.0D, Math.min(1.0D, pressure));
+    }
+
+    public double regionalPressure() {
+        return regionalPressure;
     }
 
     public void reinforceDemandOnReward(
@@ -101,19 +121,7 @@ public class LearningStore {
         if (saved == null) {
             return;
         }
-        state.hydrate(
-                saved.movement60,
-                saved.breaks60,
-                saved.places60,
-                saved.zones60,
-                saved.movement15m,
-                saved.breaks15m,
-                saved.places15m,
-                saved.zones15m,
-                saved.chunks60,
-                saved.chunks15m,
-                saved.observedSec * 1000L
-        );
+        applyPersistedFeatures(state, saved);
     }
 
     public void savePlayerFeatures(PlayerFeatureState state) {
@@ -148,6 +156,11 @@ public class LearningStore {
             return null;
         }
         PlayerFeatureState state = new PlayerFeatureState(playerId);
+        applyPersistedFeatures(state, saved);
+        return state;
+    }
+
+    private static void applyPersistedFeatures(PlayerFeatureState state, PersistedPlayer saved) {
         state.hydrate(
                 saved.movement60,
                 saved.breaks60,
@@ -159,9 +172,14 @@ public class LearningStore {
                 saved.zones15m,
                 saved.chunks60,
                 saved.chunks15m,
+                saved.mine60,
+                saved.wood60,
+                saved.farm60,
+                saved.build60,
+                saved.craft60,
+                saved.combat60,
                 saved.observedSec * 1000L
         );
-        return state;
     }
 
     public void noteTier(MemoryTier tier) {
@@ -198,6 +216,7 @@ public class LearningStore {
         for (int i = 0; i < FeatureSchema.DEMAND_DIM; i++) {
             props.setProperty("demand.w." + i, Double.toString(demandModel.weights()[i]));
         }
+        writeActivityModel(props);
         props.setProperty("server.heap.q50", formatRatio(serverContext.q50()));
         props.setProperty("server.heap.q75", formatRatio(serverContext.q75()));
         props.setProperty("server.heap.q90", formatRatio(serverContext.q90()));
@@ -213,7 +232,7 @@ public class LearningStore {
             Files.createDirectories(dataDir);
             Path target = dataDir.resolve(STATE_FILE);
             try (OutputStream out = Files.newOutputStream(target)) {
-                props.store(out, "LeanCore learning v3");
+                props.store(out, "LeanCore learning v4");
             }
             flushCount++;
         } catch (IOException ignored) {
@@ -223,7 +242,7 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v3 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d",
+                "learning=v4 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d",
                 config.learningEnabled,
                 flushCount,
                 players.size(),
@@ -235,7 +254,14 @@ public class LearningStore {
     }
 
     public String mlStatusLine() {
-        return FeatureSchema.versionLine() + " | " + demandModel.statusLine();
+        return FeatureSchema.versionLine()
+                + " | " + demandModel.statusLine()
+                + " | activityUpdates=" + activityClassifier.updates()
+                + " | banditCtx=v1 dim=" + PolicyBandit.CONTEXT_DIM;
+    }
+
+    public String holdoutStatusLine() {
+        return holdoutCohort.statusLine(System.currentTimeMillis());
     }
 
     public String windowLine() {
@@ -292,6 +318,30 @@ public class LearningStore {
                     readInt(props, "unload.engine", 0)
             );
         }
+        if (schema >= 4) {
+            loadActivityModel(props);
+        }
+    }
+
+    private void writeActivityModel(Properties props) {
+        props.setProperty("activity.updates", Integer.toString(activityClassifier.updates()));
+        double[][] weights = activityClassifier.weights();
+        for (int c = 0; c < weights.length; c++) {
+            for (int i = 0; i < ActivityFeatureEncoder.DIM; i++) {
+                props.setProperty("activity.w." + c + "." + i, Double.toString(weights[c][i]));
+            }
+        }
+    }
+
+    private void loadActivityModel(Properties props) {
+        int classes = PlayerBehavior.values().length;
+        double[][] weights = new double[classes][ActivityFeatureEncoder.DIM];
+        for (int c = 0; c < classes; c++) {
+            for (int i = 0; i < ActivityFeatureEncoder.DIM; i++) {
+                weights[c][i] = readDouble(props, "activity.w." + c + "." + i, 0.0D);
+            }
+        }
+        activityClassifier.hydrate(weights, readInt(props, "activity.updates", 0));
     }
 
     private void loadDemandModel(Properties props) {
@@ -386,6 +436,12 @@ public class LearningStore {
         props.setProperty(prefix + "zones15m", Double.toString(player.zones15m));
         props.setProperty(prefix + "chunks60", Double.toString(player.chunks60));
         props.setProperty(prefix + "chunks15m", Double.toString(player.chunks15m));
+        props.setProperty(prefix + "mine60", Double.toString(player.mine60));
+        props.setProperty(prefix + "wood60", Double.toString(player.wood60));
+        props.setProperty(prefix + "farm60", Double.toString(player.farm60));
+        props.setProperty(prefix + "build60", Double.toString(player.build60));
+        props.setProperty(prefix + "craft60", Double.toString(player.craft60));
+        props.setProperty(prefix + "combat60", Double.toString(player.combat60));
         props.setProperty(prefix + "holdout", Boolean.toString(HoldoutSet.isHoldout(id)));
         props.setProperty(prefix + "observedSec", Long.toString(player.observedSec));
     }
@@ -433,6 +489,12 @@ public class LearningStore {
             double zones15m,
             double chunks60,
             double chunks15m,
+            double mine60,
+            double wood60,
+            double farm60,
+            double build60,
+            double craft60,
+            double combat60,
             long observedSec
     ) {
         static PersistedPlayer empty() {
@@ -441,6 +503,7 @@ public class LearningStore {
                     0.0D, 0.0D, 0.0D, 0.0D,
                     0.0D, 0.0D, 0.0D, 0.0D,
                     0.0D, 0.0D,
+                    0.0D, 0.0D, 0.0D, 0.0D, 0.0D, 0.0D,
                     0L
             );
         }
@@ -451,6 +514,8 @@ public class LearningStore {
                     state.emaMovement60(), state.emaBreaks60(), state.emaPlaces60(), state.emaZones60(),
                     state.emaMovement15m(), state.emaBreaks15m(), state.emaPlaces15m(), state.emaZones15m(),
                     state.emaChunks60(), state.emaChunks15m(),
+                    state.emaMine60(), state.emaWood60(), state.emaFarm60(),
+                    state.emaBuild60(), state.emaCraft60(), state.emaCombat60(),
                     state.observedSec()
             );
         }
@@ -471,6 +536,12 @@ public class LearningStore {
                     zones15m,
                     chunks60,
                     chunks15m,
+                    mine60,
+                    wood60,
+                    farm60,
+                    build60,
+                    craft60,
+                    combat60,
                     observedSec
             );
         }
@@ -481,35 +552,55 @@ public class LearningStore {
             }
             return switch (field) {
                 case "demand" -> new PersistedPlayer(readDouble(raw, demand), confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "confidence" -> new PersistedPlayer(demand, readDouble(raw, confidence), retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "retentionMb" -> new PersistedPlayer(demand, confidence, readInt(raw, retentionMb), debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "label" -> new PersistedPlayer(demand, confidence, retentionMb, parseLabel(raw),
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "movement60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        readDouble(raw, movement60), breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        readDouble(raw, movement60), breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "breaks60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, readDouble(raw, breaks60), places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, readDouble(raw, breaks60), places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "places60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, readDouble(raw, places60), zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, readDouble(raw, places60), zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "zones60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, readDouble(raw, zones60), movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, readDouble(raw, zones60), movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "movement15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, readDouble(raw, movement15m), breaks15m, places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, readDouble(raw, movement15m), breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "breaks15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, readDouble(raw, breaks15m), places15m, zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, readDouble(raw, breaks15m), places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "places15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, readDouble(raw, places15m), zones15m, chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, readDouble(raw, places15m), zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "zones15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, readDouble(raw, zones15m), chunks60, chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, readDouble(raw, zones15m), chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "chunks60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, readDouble(raw, chunks60), chunks15m, observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m,
+                        readDouble(raw, chunks60), chunks15m, mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "chunks15m" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, readDouble(raw, chunks15m), observedSec);
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m,
+                        chunks60, readDouble(raw, chunks15m), mine60, wood60, farm60, build60, craft60, combat60, observedSec);
                 case "observedSec" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
-                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, readLong(raw, observedSec));
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m, mine60, wood60, farm60, build60, craft60, combat60, readLong(raw, observedSec));
+                case "mine60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m,
+                        readDouble(raw, mine60), wood60, farm60, build60, craft60, combat60, observedSec);
+                case "wood60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m,
+                        mine60, readDouble(raw, wood60), farm60, build60, craft60, combat60, observedSec);
+                case "farm60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m,
+                        mine60, wood60, readDouble(raw, farm60), build60, craft60, combat60, observedSec);
+                case "build60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m,
+                        mine60, wood60, farm60, readDouble(raw, build60), craft60, combat60, observedSec);
+                case "craft60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m,
+                        mine60, wood60, farm60, build60, readDouble(raw, craft60), combat60, observedSec);
+                case "combat60" -> new PersistedPlayer(demand, confidence, retentionMb, debugLabel,
+                        movement60, breaks60, places60, zones60, movement15m, breaks15m, places15m, zones15m, chunks60, chunks15m,
+                        mine60, wood60, farm60, build60, craft60, readDouble(raw, combat60), observedSec);
                 default -> this;
             };
         }

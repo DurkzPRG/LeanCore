@@ -1,12 +1,12 @@
 package com.durkz.leancore.intelligence;
 
 /**
- * ML input feature contract for demand and bandit models (v1).
+ * ML input feature contract for demand and bandit models.
  */
 public final class FeatureSchema {
 
-    public static final int VERSION = 1;
-    public static final int DEMAND_DIM = 7;
+    public static final int VERSION = 2;
+    public static final int DEMAND_DIM = 11;
 
     private FeatureSchema() {
     }
@@ -24,7 +24,11 @@ public final class FeatureSchema {
                 FeatureNormalizer.clamp01(state.emaZones60() / 20.0D),
                 FeatureNormalizer.clamp01(state.emaChunks60() / 64.0D),
                 activity,
-                idle
+                idle,
+                FeatureNormalizer.clamp01(state.emaMine60() / 24.0D),
+                FeatureNormalizer.clamp01(state.emaWood60() / 24.0D),
+                FeatureNormalizer.clamp01(state.emaFarm60() / 24.0D),
+                FeatureNormalizer.clamp01(state.emaBuild60() / 24.0D)
         };
     }
 

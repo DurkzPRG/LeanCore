@@ -19,6 +19,10 @@ public class OnlineLinearDemandModel implements DemandModel {
         weights[0] = 0.15D;
         weights[4] = 0.20D;
         weights[5] = 0.25D;
+        weights[7] = 0.18D;
+        weights[8] = 0.12D;
+        weights[9] = 0.10D;
+        weights[10] = 0.14D;
     }
 
     @Override
@@ -80,8 +84,9 @@ public class OnlineLinearDemandModel implements DemandModel {
     }
 
     public void hydrate(double[] savedWeights, int savedUpdates) {
-        if (savedWeights != null && savedWeights.length == FeatureSchema.DEMAND_DIM) {
-            System.arraycopy(savedWeights, 0, weights, 0, FeatureSchema.DEMAND_DIM);
+        if (savedWeights != null) {
+            int copy = Math.min(FeatureSchema.DEMAND_DIM, savedWeights.length);
+            System.arraycopy(savedWeights, 0, weights, 0, copy);
         }
         updates = Math.max(0, savedUpdates);
     }
