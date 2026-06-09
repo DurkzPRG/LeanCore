@@ -38,13 +38,6 @@ Solo boot log: `LeanCore 1.2.1 setup (localHostMode=AUTO).` and `Runtime started
 
 View-radius cuts never apply on embedded solo (1 player, not dedicated).
 
-## 1.2.1 highlights
-
-- **Hatchet / Hytale wood**: chop tools and tree blocks classified correctly (not confused with pickaxe or FIGHTER)
-- **Faster role switch**: recent activity window (last 16 actions) updates MINER / LUMBERJACK / BUILDER in seconds
-- **Performance**: block classify cache, gather-type cache, throttled ML training, no chunk probe on LITE dormancy tick
-- **Dirty flush**: `learning.state` only written when data changed (`learningEnabled` required)
-
 ## Install
 
 1. Download **LeanCore-1.2.1.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
