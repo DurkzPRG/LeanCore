@@ -5,9 +5,11 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class LeanCoreConfig {
@@ -87,7 +89,7 @@ public class LeanCoreConfig {
             return config;
         }
 
-        try (FileReader reader = new FileReader(file)) {
+        try (Reader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
             LeanCoreConfig loaded = GSON.fromJson(reader, LeanCoreConfig.class);
             if (loaded != null) {
                 loaded.configFile = file;
@@ -177,7 +179,7 @@ public class LeanCoreConfig {
         if (configFile == null) {
             return;
         }
-        try (FileWriter writer = new FileWriter(configFile)) {
+        try (Writer writer = Files.newBufferedWriter(configFile.toPath(), StandardCharsets.UTF_8)) {
             GSON.toJson(this, writer);
         } catch (IOException ignored) {
         }

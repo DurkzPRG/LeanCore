@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class LearningStore {
 
-    static final int SCHEMA_VERSION = 4;
+    static final int SCHEMA_VERSION = 5;
     private static final String STATE_FILE = "learning.state";
 
     private final Path dataDir;
@@ -33,6 +33,7 @@ public class LearningStore {
     private final ActivityClassifierModel activityClassifier;
     private final UnloadOutcomeTracker unloadOutcomeTracker;
     private final HoldoutCohortTracker holdoutCohort = new HoldoutCohortTracker();
+    private final PolicyBlacklistTracker policyBlacklist = new PolicyBlacklistTracker();
 
     private volatile double regionalPressure;
     private MemoryTier lastTier = MemoryTier.COMFORT;
@@ -87,6 +88,10 @@ public class LearningStore {
 
     public HoldoutCohortTracker holdoutCohort() {
         return holdoutCohort;
+    }
+
+    public PolicyBlacklistTracker policyBlacklist() {
+        return policyBlacklist;
     }
 
     public void setRegionalPressure(double pressure) {
@@ -237,6 +242,7 @@ public class LearningStore {
         props.setProperty("server.heap.samples", Integer.toString(serverContext.sampleCount()));
 
         writeBandit(props);
+        writeBlacklist(props, now);
         for (Map.Entry<UUID, PersistedPlayer> e : players.entrySet()) {
             writePlayer(props, e.getKey(), e.getValue());
         }
@@ -245,7 +251,7 @@ public class LearningStore {
             Files.createDirectories(dataDir);
             Path target = dataDir.resolve(STATE_FILE);
             try (OutputStream out = Files.newOutputStream(target)) {
-                props.store(out, "LeanCore learning v4");
+                props.store(out, "LeanCore learning v5");
             }
             flushCount++;
             flushedGeneration = stateGeneration;
@@ -256,7 +262,7 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v4 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d",
+                "learning=v5 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
                 config.learningEnabled,
                 flushCount,
                 players.size(),
@@ -264,7 +270,8 @@ public class LearningStore {
                 heapWindows.avg60s(now) * 100.0D,
                 outcomeTracker.completed(),
                 outcomeTracker.discarded(),
-                falseCutTracker.sessionCuts());
+                falseCutTracker.sessionCuts(),
+                policyBlacklist.activeCount(now));
     }
 
     public String mlStatusLine() {
@@ -334,6 +341,9 @@ public class LearningStore {
         }
         if (schema >= 4) {
             loadActivityModel(props);
+        }
+        if (schema >= 5) {
+            loadBlacklist(props, System.currentTimeMillis());
         }
     }
 
@@ -421,6 +431,31 @@ public class LearningStore {
         }
     }
 
+    private void writeBlacklist(Properties props, long nowMs) {
+        for (Map.Entry<String, Long> entry : policyBlacklist.snapshotActive(nowMs).entrySet()) {
+            props.setProperty("blacklist." + entry.getKey() + ".untilMs", Long.toString(entry.getValue()));
+        }
+    }
+
+    private void loadBlacklist(Properties props, long nowMs) {
+        Map<String, Long> entries = new java.util.HashMap<>();
+        for (String key : props.stringPropertyNames()) {
+            if (!key.startsWith("blacklist.")) {
+                continue;
+            }
+            String suffix = key.substring("blacklist.".length());
+            if (!suffix.endsWith(".untilMs")) {
+                continue;
+            }
+            String policyKey = suffix.substring(0, suffix.length() - ".untilMs".length());
+            long untilMs = readLong(props, key, 0L);
+            if (untilMs > nowMs) {
+                entries.put(policyKey, untilMs);
+            }
+        }
+        policyBlacklist.hydrate(entries, nowMs);
+    }
+
     private void writeBandit(Properties props) {
         for (Map.Entry<String, PolicyBandit.ArmState> e : policyBandit.arms().entrySet()) {
             String prefix = "bandit." + e.getKey() + ".";
@@ -479,6 +514,18 @@ public class LearningStore {
         }
         try {
             return Integer.parseInt(raw);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static long readLong(Properties props, String key, long fallback) {
+        String raw = props.getProperty(key);
+        if (raw == null) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(raw);
         } catch (NumberFormatException ignored) {
             return fallback;
         }

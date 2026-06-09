@@ -15,7 +15,6 @@ import com.hypixel.hytale.server.core.universe.Universe;
 import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class MemoryGovernor {
 
@@ -33,7 +32,6 @@ public class MemoryGovernor {
     private double heapAtChange;
     private boolean rolledBack;
     private double[] contextAtChange;
-    private final Map<String, Long> blacklistedUntilMs = new ConcurrentHashMap<>();
 
     private volatile GovernorStatus lastStatus = GovernorStatus.idle();
 
@@ -123,7 +121,8 @@ public class MemoryGovernor {
         }
 
         GovernorPolicy failed = activePolicy;
-        blacklistedUntilMs.put(failed.key(), System.currentTimeMillis() + 15 * 60_000L);
+        learningStore.policyBlacklist().blacklist(failed.key(), System.currentTimeMillis() + 15 * 60_000L);
+        learningStore.markDirty();
         outcomeTracker.onRollback(failed.key(), contextAtChange);
         activePolicy = previousPolicy;
         rolledBack = true;
@@ -158,7 +157,7 @@ public class MemoryGovernor {
                 learningStore.serverContext().q50(),
                 learningStore.regionalPressure(),
                 activePolicy,
-                this::isBlacklisted
+                learningStore.policyBlacklist()::isBlacklisted
         );
     }
 
@@ -218,18 +217,6 @@ public class MemoryGovernor {
             sum += demand.demand();
         }
         return sum / demands.size();
-    }
-
-    private boolean isBlacklisted(String policyKey) {
-        Long until = blacklistedUntilMs.get(policyKey);
-        if (until == null) {
-            return false;
-        }
-        if (System.currentTimeMillis() >= until) {
-            blacklistedUntilMs.remove(policyKey);
-            return false;
-        }
-        return true;
     }
 
     private boolean shouldApplyViewRadius(MemorySnapshot sample) {
