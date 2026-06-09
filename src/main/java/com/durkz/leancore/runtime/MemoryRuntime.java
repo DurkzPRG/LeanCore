@@ -267,6 +267,9 @@ public class MemoryRuntime {
     }
 
     private void tickLite(java.util.Collection<PlayerRef> online, long nowMs) {
+        if (!online.isEmpty()) {
+            classifier.samplePositionsLite(online, nowMs);
+        }
         if (SoloRuntimePolicy.shouldRefreshDormancy(
                 config,
                 lastLiteX,
@@ -276,7 +279,6 @@ public class MemoryRuntime {
                 lastDormancyRefreshMs
         )) {
             dormancyMap.refreshFromPlayers();
-            classifier.samplePositionsLite(online, nowMs);
             lastDormancyRefreshMs = nowMs;
             SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
             lastLiteX = motion.x();

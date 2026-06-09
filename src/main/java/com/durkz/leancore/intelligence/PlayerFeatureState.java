@@ -11,6 +11,7 @@ public class PlayerFeatureState {
     static final long HALF_LIFE_15M_MS = 15 * 60_000L;
     static final long HALF_LIFE_ACTIVITY_MS = 20_000L;
     static final long SPATIAL_SAMPLE_INTERVAL_MS = 5_000L;
+    static final long EXPLORE_PULSE_INTERVAL_MS = 3_000L;
     private static final double CHUNK_BLEND_60 = blend(SPATIAL_SAMPLE_INTERVAL_MS, HALF_LIFE_60S_MS);
     private static final double CHUNK_BLEND_15M = blend(SPATIAL_SAMPLE_INTERVAL_MS, HALF_LIFE_15M_MS);
     private static final double MAX_SANE_CHUNK_EMA = 256.0D;
@@ -37,6 +38,7 @@ public class PlayerFeatureState {
 
     private final RecentActivityBuffer recentActivity = new RecentActivityBuffer();
 
+    private long lastExplorePulseMs;
     private long lastActivityMs;
     private long firstSeenMs;
     private long observedMs;
@@ -111,10 +113,6 @@ public class PlayerFeatureState {
         onActivity(ActionKind.CRAFT, false, false);
     }
 
-    public void onCombatHit() {
-        onActivity(ActionKind.COMBAT, false, false);
-    }
-
     public void onBlockBroken() {
         onBlockBroken(BlockActionContext.unknown());
     }
@@ -139,23 +137,35 @@ public class PlayerFeatureState {
                 emaMine60 += 1.0D;
                 emaWood60 *= 0.72D;
                 emaBuild60 *= 0.85D;
+                dampenCombat();
             }
             case CHOP -> {
                 emaWood60 += 1.0D;
                 emaMine60 *= 0.72D;
                 emaBuild60 *= 0.85D;
+                dampenCombat();
             }
             case FARM -> {
                 emaFarm60 += 1.0D;
                 emaMine60 *= 0.85D;
                 emaWood60 *= 0.85D;
+                dampenCombat();
             }
             case BUILD -> {
                 emaBuild60 += 1.0D;
                 emaMine60 *= 0.85D;
                 emaWood60 *= 0.85D;
+                dampenCombat();
             }
-            case CRAFT -> emaCraft60 += 1.0D;
+            case CRAFT -> {
+                emaCraft60 += 1.0D;
+                dampenCombat();
+            }
+            case EXPLORE -> {
+                emaZones60 += 1.0D;
+                emaZones15m += 1.0D;
+                dampenCombat();
+            }
             case COMBAT -> emaCombat60 += 1.0D;
             default -> {
             }
@@ -170,11 +180,11 @@ public class PlayerFeatureState {
     }
 
     public void onZoneDiscovered() {
-        long nowMs = System.currentTimeMillis();
-        tick(nowMs);
-        emaZones60 += 1.0D;
-        emaZones15m += 1.0D;
-        lastActivityMs = nowMs;
+        onActivity(ActionKind.EXPLORE, false, false);
+    }
+
+    public void onCombatHit() {
+        onActivity(ActionKind.COMBAT, false, false);
     }
 
     public void noteViewRadius(int serverRadius, int clientRadius) {
@@ -206,17 +216,28 @@ public class PlayerFeatureState {
     }
 
     public void samplePosition(double x, double z) {
+        long nowMs = System.currentTimeMillis();
+        tick(nowMs);
         if (positioned) {
             double dist = Math.hypot(x - lastX, z - lastZ);
             if (dist >= SIGNIFICANT_MOVE_BLOCKS) {
                 emaMovement60 += dist;
                 emaMovement15m += dist;
-                lastActivityMs = System.currentTimeMillis();
+                emaCombat60 *= 0.90D;
+                if (nowMs - lastExplorePulseMs >= EXPLORE_PULSE_INTERVAL_MS) {
+                    recentActivity.record(ActionKind.EXPLORE);
+                    lastExplorePulseMs = nowMs;
+                }
+                lastActivityMs = nowMs;
             }
         }
         lastX = x;
         lastZ = z;
         positioned = true;
+    }
+
+    private void dampenCombat() {
+        emaCombat60 *= 0.72D;
     }
 
     public void tick(long nowMs) {

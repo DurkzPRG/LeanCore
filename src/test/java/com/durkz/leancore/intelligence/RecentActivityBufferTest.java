@@ -35,4 +35,18 @@ class RecentActivityBufferTest {
         }
         assertEquals(PlayerBehavior.LUMBERJACK, BehaviorPosterior.topLabel(state, null, System.currentTimeMillis()));
     }
+
+    @Test
+    void switchesFromFighterToExplorerAfterZoneDiscovery() {
+        PlayerFeatureState state = new PlayerFeatureState(UUID.randomUUID());
+        for (int i = 0; i < 10; i++) {
+            state.onCombatHit();
+        }
+        assertEquals(PlayerBehavior.FIGHTER, state.recentDominantBehavior());
+
+        for (int i = 0; i < 9; i++) {
+            state.onZoneDiscovered();
+        }
+        assertEquals(PlayerBehavior.EXPLORER, BehaviorPosterior.topLabel(state, null, System.currentTimeMillis()));
+    }
 }
