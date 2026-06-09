@@ -11,6 +11,7 @@ import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemoryGovernor;
 import com.durkz.leancore.memory.MemoryPressureSensor;
 import com.durkz.leancore.memory.MemorySnapshot;
+import com.durkz.leancore.memory.SessionSavingsTracker;
 import com.durkz.leancore.memory.PolicyApplier;
 import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
@@ -36,6 +37,7 @@ public class MemoryRuntime {
     private final SessionModeDetector sessionDetector;
     private final LearningStore learningStore;
     private final MemoryGovernor governor;
+    private final SessionSavingsTracker sessionSavings;
     private final MemoryHudService hudService;
     private final CriticalWebhookNotifier webhookNotifier;
     private final RegionalPressureCache regionalPressureCache = new RegionalPressureCache();
@@ -62,6 +64,7 @@ public class MemoryRuntime {
             SessionModeDetector sessionDetector,
             LearningStore learningStore,
             MemoryGovernor governor,
+            SessionSavingsTracker sessionSavings,
             MemoryHudService hudService,
             CriticalWebhookNotifier webhookNotifier
     ) {
@@ -74,6 +77,7 @@ public class MemoryRuntime {
         this.sessionDetector = sessionDetector;
         this.learningStore = learningStore;
         this.governor = governor;
+        this.sessionSavings = sessionSavings;
         this.hudService = hudService;
         this.webhookNotifier = webhookNotifier;
     }
@@ -84,7 +88,8 @@ public class MemoryRuntime {
             BehaviorClassifier classifier,
             LearningStore learningStore
     ) {
-        MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext());
+        SessionSavingsTracker sessionSavings = new SessionSavingsTracker();
+        MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext(), sessionSavings);
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         ZoneChunkUnloader zoneChunkUnloader = new ZoneChunkUnloader(config, learningStore.unloadOutcomeTracker());
         RetentionAllocator allocator = new RetentionAllocator(config);
@@ -103,6 +108,7 @@ public class MemoryRuntime {
                 new SessionModeDetector(config),
                 learningStore,
                 governor,
+                sessionSavings,
                 hudService,
                 webhookNotifier
         );
@@ -246,6 +252,10 @@ public class MemoryRuntime {
 
         if (profile.runsGovernor(config)) {
             governor.tick(sample, lastMode, demands, dormancyMap);
+            GovernorStatus govStatus = governor.status();
+            if (govStatus.enabled()) {
+                sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
+            }
             double reward = learningStore.outcomeTracker().pollCompletedReward();
             if (!Double.isNaN(reward)) {
                 learningStore.reinforceDemandOnReward(
@@ -325,6 +335,12 @@ public class MemoryRuntime {
         return sample != null ? sample : sensor.sample();
     }
 
+    public MemorySnapshot freshSample() {
+        MemorySnapshot sample = sensor.sample();
+        lastSample = sample;
+        return sample;
+    }
+
     public SessionMode lastMode() {
         return lastMode;
     }
@@ -347,6 +363,10 @@ public class MemoryRuntime {
 
     public BehaviorClassifier classifier() {
         return classifier;
+    }
+
+    public SessionSavingsTracker sessionSavings() {
+        return sessionSavings;
     }
 
     public GovernorStatus governorStatus() {

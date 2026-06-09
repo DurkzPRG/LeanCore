@@ -53,6 +53,7 @@ Main command: `/leancore`
 |---------|-----|---------|
 | `/leancore status` | Everyone | Profile, preset, heap tier |
 | `/leancore memory` | Everyone | Heap snapshot and tier |
+| `/leancore savings` | Everyone | Session JVM heap peak/baseline, governor state, and cumulative zone/chunk actions (measured vs estimated) |
 | `/leancore zones` | Everyone | Dormancy counters |
 | `/leancore learn` | Everyone | Bandit, quantiles, demand model |
 | `/leancore learn player` | Everyone | Your features, posterior, activity EMAs |

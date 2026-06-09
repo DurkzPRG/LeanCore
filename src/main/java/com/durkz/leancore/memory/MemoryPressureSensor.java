@@ -11,9 +11,15 @@ import java.util.List;
 public class MemoryPressureSensor {
 
     private final ServerContextTracker serverContext;
+    private final SessionSavingsTracker sessionSavings;
 
     public MemoryPressureSensor(ServerContextTracker serverContext) {
+        this(serverContext, null);
+    }
+
+    public MemoryPressureSensor(ServerContextTracker serverContext, SessionSavingsTracker sessionSavings) {
         this.serverContext = serverContext;
+        this.sessionSavings = sessionSavings;
     }
 
     public MemorySnapshot sample() {
@@ -27,6 +33,9 @@ public class MemoryPressureSensor {
         double ratio = max <= 0L ? 0.0D : (double) used / max;
 
         long nowMs = System.currentTimeMillis();
+        if (sessionSavings != null) {
+            sessionSavings.noteHeapSample(used, max, nowMs);
+        }
         if (trackQuantiles) {
             serverContext.observe(ratio, nowMs);
         }

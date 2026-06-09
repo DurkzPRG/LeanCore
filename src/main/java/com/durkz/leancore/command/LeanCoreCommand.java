@@ -10,6 +10,9 @@ import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.permissions.LeanCorePermissions;
 import com.durkz.leancore.intelligence.PlayerFeatureState;
 import com.durkz.leancore.intelligence.RetentionDemand;
+import com.durkz.leancore.memory.GovernorStatus;
+import com.durkz.leancore.memory.MemorySnapshot;
+import com.durkz.leancore.memory.SavingsReport;
 import com.durkz.leancore.probe.ApiProbe;
 import com.durkz.leancore.runtime.MemoryRuntime;
 import com.hypixel.hytale.server.core.Message;
@@ -35,6 +38,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         super("leancore", "LeanCore diagnostics");
         addSubCommand(new StatusCmd());
         addSubCommand(new MemoryCmd());
+        addSubCommand(new SavingsCmd());
         addSubCommand(new ZonesCmd());
         addSubCommand(new ProbeCmd());
         addSubCommand(new LearnCmd());
@@ -167,6 +171,35 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     gov.unloadCandidateZones()), "#AAAAAA");
             if (gov.rolledBack()) {
                 say(ctx, "rollback active (policy reverted)", "#FF8888");
+            }
+        }
+    }
+
+    private static final class SavingsCmd extends CommandBase {
+        SavingsCmd() {
+            super("savings", "Session JVM heap and governor activity summary");
+        }
+
+        @Override
+        protected void executeSync(CommandContext ctx) {
+            MemoryRuntime rt = runtime(ctx);
+            LeanCorePlugin plugin = plugin(ctx);
+            if (rt == null || plugin == null) {
+                return;
+            }
+            long nowMs = System.currentTimeMillis();
+            MemorySnapshot sample = rt.freshSample();
+            GovernorStatus governor = rt.governorStatus();
+            for (SavingsReport.Line line : SavingsReport.format(
+                    sample,
+                    rt.sessionSavings(),
+                    governor,
+                    plugin.config(),
+                    rt.activeProfile(),
+                    rt.learningStore().unloadOutcomeTracker(),
+                    nowMs
+            )) {
+                say(ctx, line.text(), line.color());
             }
         }
     }
