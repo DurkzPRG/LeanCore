@@ -9,6 +9,7 @@ public class OnlineLinearDemandModel implements DemandModel {
 
     private static final double LEARNING_RATE = 0.08D;
     private static final double RIDGE = 0.02D;
+    private static final double WEIGHT_DECAY = 0.9995D;
     private static final double MIN_BLEND = 0.35D;
 
     private final HeuristicDemandModel heuristic = new HeuristicDemandModel();
@@ -65,6 +66,7 @@ public class OnlineLinearDemandModel implements DemandModel {
         double prediction = predictDemand(state, nowMs);
         double error = targetDemand - prediction;
         for (int i = 0; i < FeatureSchema.DEMAND_DIM; i++) {
+            weights[i] *= WEIGHT_DECAY;
             weights[i] += LEARNING_RATE * (error * x[i] - RIDGE * weights[i]);
         }
         updates++;

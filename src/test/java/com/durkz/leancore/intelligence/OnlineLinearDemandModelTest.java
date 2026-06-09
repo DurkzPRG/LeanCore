@@ -40,4 +40,15 @@ class OnlineLinearDemandModelTest {
         }
         assertTrue(model.updates() >= 10);
     }
+
+    @Test
+    void decaysWeightsOnEachUpdate() {
+        OnlineLinearDemandModel model = new OnlineLinearDemandModel();
+        UUID id = UUID.randomUUID();
+        PlayerFeatureState state = new PlayerFeatureState(id);
+        double before = model.weights()[0];
+        double prediction = model.predictDemand(state, System.currentTimeMillis());
+        model.onOutcome(id, state, prediction, 0.1D, System.currentTimeMillis());
+        assertTrue(model.weights()[0] < before);
+    }
 }
