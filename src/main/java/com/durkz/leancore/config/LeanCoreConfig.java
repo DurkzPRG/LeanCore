@@ -49,6 +49,7 @@ public class LeanCoreConfig {
     public int dormancyRefreshIntervalSeconds = 15;
     public int minViewRadiusDelta = 2;
     public boolean unloadEnabled = false;
+    /** Poll loaded-chunk deltas on the world thread; do not register ChunkUnloadEvent listeners. */
     public boolean chunkUnloadEventTracking = false;
     public int unloadMinIntervalSeconds = 5;
     public int unloadMaxChunksPerSweep = 16;

@@ -7,6 +7,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
+import com.durkz.leancore.intelligence.EngineUnloadPoller;
 import com.durkz.leancore.intelligence.LearningStore;
 import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemoryGovernor;
@@ -23,9 +24,13 @@ import com.durkz.leancore.ui.MemoryHudService;
 import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.universe.world.World;
 
+import java.util.Collection;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class MemoryRuntime {
 
@@ -42,6 +47,7 @@ public class MemoryRuntime {
     private final MemoryHudService hudService;
     private final CriticalWebhookNotifier webhookNotifier;
     private final RegionalPressureCache regionalPressureCache = new RegionalPressureCache();
+    private final EngineUnloadPoller engineUnloadPoller = new EngineUnloadPoller();
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -229,10 +235,42 @@ public class MemoryRuntime {
             return;
         }
 
+        final RuntimeProfile governorProfile = profile;
+        World world = resolvePrimaryWorld(online);
+        if (world == null) {
+            tickGovernor(governorProfile, online, nowMs);
+            return;
+        }
+
+        CompletableFuture<Void> done = new CompletableFuture<>();
+        world.execute(() -> {
+            try {
+                tickGovernor(governorProfile, online, nowMs);
+            } catch (Exception e) {
+                plugin.getLogger().atWarning().withCause(e).log("governor tick failed");
+            } finally {
+                done.complete(null);
+            }
+        });
+        try {
+            done.get(5L, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            done.cancel(true);
+            plugin.getLogger().atWarning().log("governor tick timed out waiting for world thread");
+        } catch (Exception e) {
+            plugin.getLogger().atWarning().withCause(e).log("governor tick wait failed");
+        }
+    }
+
+    private void tickGovernor(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs) {
         long dormancyIntervalMs = dormancyIntervalMs(profile);
         if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= dormancyIntervalMs) {
             dormancyMap.refreshFromPlayers();
             lastDormancyRefreshMs = nowMs;
+        }
+
+        if (config.chunkUnloadEventTracking) {
+            engineUnloadPoller.poll(online, learningStore.unloadOutcomeTracker());
         }
 
         regionalPressureCache.maybeSample(online, config.regionalPressureIntervalSeconds, nowMs);
@@ -278,6 +316,22 @@ public class MemoryRuntime {
         if (profile.runsHud(config) && hudService != null) {
             hudService.refresh(this);
         }
+    }
+
+    private static World resolvePrimaryWorld(Collection<PlayerRef> online) {
+        if (online == null) {
+            return null;
+        }
+        for (PlayerRef ref : online) {
+            if (ref == null || !ref.isValid() || ref.getWorldUuid() == null) {
+                continue;
+            }
+            World world = Universe.get().getWorld(ref.getWorldUuid());
+            if (world != null && world.isAlive()) {
+                return world;
+            }
+        }
+        return null;
     }
 
     private void tickLite(java.util.Collection<PlayerRef> online, long nowMs) {

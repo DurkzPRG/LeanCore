@@ -24,8 +24,15 @@ public class UnloadOutcomeTracker {
     }
 
     public void noteEngineUnload() {
-        engineUnloads.incrementAndGet();
-        windowEngine.incrementAndGet();
+        noteEngineUnloads(1);
+    }
+
+    public void noteEngineUnloads(int count) {
+        if (count <= 0) {
+            return;
+        }
+        engineUnloads.addAndGet(count);
+        windowEngine.addAndGet(count);
     }
 
     public int policyUnloads() {
