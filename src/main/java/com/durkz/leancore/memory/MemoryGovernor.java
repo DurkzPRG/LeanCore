@@ -1,6 +1,7 @@
 package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.HoldoutSet;
@@ -58,7 +59,7 @@ public class MemoryGovernor {
             Map<UUID, RetentionDemand> demands,
             ZoneDormancyMap dormancyMap
     ) {
-        if (!config.enabled || !config.governEnabled) {
+        if (!RuntimeGuard.active() || !config.enabled || !config.governEnabled) {
             lastStatus = GovernorStatus.idle();
             return;
         }
@@ -233,16 +234,11 @@ public class MemoryGovernor {
     }
 
     private boolean shouldApplyViewRadius(MemorySnapshot sample) {
-        if (!config.viewRadiusGovernanceEnabled) {
-            return false;
-        }
-        if (viewRadiusGraceActive(System.currentTimeMillis())) {
-            return false;
-        }
-        if (!config.dedicatedServerMode && sample.onlinePlayers() <= 1) {
-            return false;
-        }
-        return true;
+        return ViewRadiusGovernance.shouldApply(
+                config,
+                sample.onlinePlayers(),
+                viewRadiusGraceActive(System.currentTimeMillis())
+        );
     }
 
     private static boolean samePolicy(GovernorPolicy a, GovernorPolicy b) {

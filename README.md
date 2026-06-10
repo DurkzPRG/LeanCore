@@ -28,19 +28,20 @@ Does not touch client FPS or GPU. Primary metric is **server JVM heap**.
 | Players | Profile | Tick | Notes |
 |---------|---------|------|-------|
 | 1 (solo local) | `LITE` | 30s (60s idle) | Dormancy + throttled heap sample |
+| 1 + `embeddedStandardProfile` | `STANDARD` | 15s | Local dogfood of govern/learning without FULL |
 | 2-8 (friends) | `STANDARD` | 15s | + classifier; govern/learning/HUD if enabled |
 | 9+ (dense local) | `FULL` | 5s | Full runtime per config |
 | Dedicated JVM | `FULL` | 5s | Full runtime per config |
 
 Default: `localHostMode: "AUTO"`. Use `"PASSIVE"` to disable background ticks. Set `dedicatedServerMode: true` on a dedicated host.
 
-Solo boot log: `LeanCore 1.3.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE`.
+Boot log: `LeanCore 1.4.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
 
-View-radius cuts never apply on embedded solo (1 player, not dedicated).
+View-radius cuts never apply on embedded solo (1 player) unless `dedicatedServerMode: true`.
 
 ## Install
 
-1. Download **LeanCore-1.3.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+1. Download **LeanCore-1.4.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Put the JAR in your world's `mods/` folder
 3. Config: `mods/durkz_LeanCore/data/LeanCore.json`
 4. Run `/leancore status` after about a minute
@@ -69,13 +70,18 @@ File: `mods/durkz_LeanCore/data/LeanCore.json`
 | Key | Default | Notes |
 |-----|---------|-------|
 | `localHostMode` | `AUTO` | `AUTO`, `PASSIVE`, or `FULL` |
+| `embeddedStandardProfile` | `false` | Solo embedded uses STANDARD instead of LITE |
 | `governEnabled` | `false` | Enable on dedicated after baseline |
 | `learningEnabled` | `false` | Policy learning + disk persistence |
 | `persistIntervalSeconds` | `300` | Learning flush interval |
-| `dedicatedServerMode` | `false` | Force FULL profile |
-| `dedicatedBootstrapEnabled` | `true` | One-time preset on first dedicated boot: enables govern, view-radius, learning |
+| `learningMaxPersistedPlayers` | `512` | Prune oldest profiles on flush (`0` = unlimited) |
+| `learningPlayerTtlDays` | `90` | Drop stale offline profiles (`0` = off) |
+| `dedicatedServerMode` | `false` | Force FULL profile; allows view-radius on solo embedded |
+| `dedicatedBootstrapEnabled` | `true` | One-time preset on first dedicated boot |
+| `unloadEnabled` | `false` | Policy chunk unload. Enable only after `/leancore probe` |
+| `gcHintEnabled` | `false` | Experimental LITE idle GC nudge |
 
-Learning snapshot: `mods/durkz_LeanCore/data/learning.state` (schema v6)
+Learning snapshot: `mods/durkz_LeanCore/data/learning.state.gz` (schema v7, gzip binary). Legacy `learning.state` is migrated on first flush.
 
 Permissions: `durkz.leancore.hud`, `durkz.leancore.admin`
 
@@ -83,8 +89,8 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 
 ## Quick verify
 
-1. Mine ore with a pickaxe, then `/leancore learn player` → `MINER`, not `FIGHTER`
-2. Switch to hatchet, chop 6+ logs → posterior should move to `LUMBERJACK`
+1. Mine ore with a pickaxe, then `/leancore learn player` shows `MINER`, not `FIGHTER`
+2. Switch to hatchet, chop 6+ logs. Posterior should move to `LUMBERJACK`
 3. Friend joins → log shows `profile LITE -> STANDARD`
 
 ## Build
@@ -93,7 +99,7 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 ./gradlew build
 ```
 
-Output: `build/libs/LeanCore-1.3.0.jar`
+Output: `build/libs/LeanCore-1.4.0.jar`
 
 ## Links
 

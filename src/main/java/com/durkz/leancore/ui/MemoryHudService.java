@@ -78,6 +78,20 @@ public class MemoryHudService {
         active.remove(uuid);
     }
 
+    public void shutdown() {
+        for (PlayerRef ref : Universe.get().getPlayers()) {
+            if (ref == null || !ref.isValid()) {
+                continue;
+            }
+            var entityRef = ref.getReference();
+            if (entityRef == null) {
+                continue;
+            }
+            disable(ref, entityRef.getStore(), entityRef);
+        }
+        active.clear();
+    }
+
     public void refresh(MemoryRuntime runtime) {
         if (!config.hudFeatureEnabled || !config.enabled) {
             return;

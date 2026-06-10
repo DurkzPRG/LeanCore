@@ -22,16 +22,16 @@ import com.durkz.leancore.session.SessionModeDetector;
 import com.durkz.leancore.probe.RegionalPressureCache;
 import com.durkz.leancore.ui.HudSessionStore;
 import com.durkz.leancore.ui.MemoryHudService;
-import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 
 import java.util.Collection;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 public class MemoryRuntime {
 
@@ -55,8 +55,12 @@ public class MemoryRuntime {
     private volatile SessionMode lastMode = SessionMode.SOLO;
     private volatile RuntimeProfile activeProfile = RuntimeProfile.LITE;
 
+    private volatile boolean running;
+    private volatile boolean shutdownDone;
+    private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> tickFuture;
     private ScheduledFuture<?> persistFuture;
+    private final AtomicBoolean governorWorldTickPending = new AtomicBoolean(false);
     private long lastDormancyRefreshMs;
     private long lastLiteHeapSampleMs;
     private double lastLiteX;
@@ -128,6 +132,9 @@ public class MemoryRuntime {
 
     public void start() {
         shutdown();
+        shutdownDone = false;
+        scheduler = newScheduler();
+        running = true;
         int playerCount = Universe.get().getPlayers().size();
         activeProfile = RuntimeActivationPolicy.resolveProfile(config, playerCount);
         if (activeProfile == null) {
@@ -147,26 +154,64 @@ public class MemoryRuntime {
         );
     }
 
+    public boolean isRunning() {
+        return running && !shutdownDone;
+    }
+
     public void shutdown() {
+        if (shutdownDone) {
+            return;
+        }
+        shutdownDone = true;
+        running = false;
+        governorWorldTickPending.set(false);
         if (tickFuture != null) {
-            tickFuture.cancel(false);
+            tickFuture.cancel(true);
             tickFuture = null;
         }
         if (persistFuture != null) {
-            persistFuture.cancel(false);
+            persistFuture.cancel(true);
             persistFuture = null;
         }
+        stopScheduler();
         persistLearning();
         if (hudService != null) {
+            hudService.shutdown();
             hudService.sessions().save();
         }
         if (webhookNotifier != null) {
             webhookNotifier.shutdown();
         }
+        plugin.getLogger().atInfo().log("Runtime stopped (daemon scheduler shut down)");
+    }
+
+    private static ScheduledExecutorService newScheduler() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "LeanCore-runtime");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    private void stopScheduler() {
+        ScheduledExecutorService active = scheduler;
+        scheduler = null;
+        if (active == null) {
+            return;
+        }
+        active.shutdownNow();
+        try {
+            active.awaitTermination(2L, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void scheduleTick(long delaySeconds) {
-        tickFuture = HytaleServer.SCHEDULED_EXECUTOR.schedule(
+        if (!running || scheduler == null) {
+            return;
+        }
+        tickFuture = scheduler.schedule(
                 this::runTick,
                 Math.max(0L, delaySeconds),
                 TimeUnit.SECONDS
@@ -174,10 +219,13 @@ public class MemoryRuntime {
     }
 
     private void schedulePersistIfNeeded() {
-        if (!config.learningEnabled || config.persistIntervalSeconds <= 0) {
+        if (!running || scheduler == null || !config.learningEnabled || config.persistIntervalSeconds <= 0) {
             return;
         }
-        persistFuture = HytaleServer.SCHEDULED_EXECUTOR.scheduleAtFixedRate(() -> {
+        persistFuture = scheduler.scheduleAtFixedRate(() -> {
+            if (!running) {
+                return;
+            }
             try {
                 persistLearning();
             } catch (Exception e) {
@@ -187,11 +235,17 @@ public class MemoryRuntime {
     }
 
     private void runTick() {
+        if (!running) {
+            return;
+        }
         try {
             tick();
         } catch (Exception e) {
             plugin.getLogger().atWarning().withCause(e).log("tick failed");
         } finally {
+            if (!running) {
+                return;
+            }
             long delaySeconds = activeProfile == RuntimeProfile.LITE
                     ? SoloRuntimePolicy.nextTickDelaySeconds(config, soloPlayerIdleSec())
                     : activeProfile.tickIntervalSeconds(config);
@@ -209,7 +263,7 @@ public class MemoryRuntime {
                     System.currentTimeMillis()
             );
         }
-        learningStore.flush();
+        learningStore.flush(true, classifier.features().snapshot().keySet());
     }
 
     private void tick() {
@@ -240,6 +294,10 @@ public class MemoryRuntime {
             return;
         }
 
+        if (!running) {
+            return;
+        }
+
         final RuntimeProfile governorProfile = profile;
         World world = resolvePrimaryWorld(online);
         if (world == null) {
@@ -247,27 +305,37 @@ public class MemoryRuntime {
             return;
         }
 
-        CompletableFuture<Void> done = new CompletableFuture<>();
-        world.execute(() -> {
-            try {
-                tickGovernor(governorProfile, online, nowMs);
-            } catch (Exception e) {
-                plugin.getLogger().atWarning().withCause(e).log("governor tick failed");
-            } finally {
-                done.complete(null);
-            }
-        });
+        if (!governorWorldTickPending.compareAndSet(false, true)) {
+            return;
+        }
         try {
-            done.get(5L, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
-            done.cancel(true);
-            plugin.getLogger().atWarning().log("governor tick timed out waiting for world thread");
-        } catch (Exception e) {
-            plugin.getLogger().atWarning().withCause(e).log("governor tick wait failed");
+            world.execute(() -> {
+                try {
+                    if (running) {
+                        tickGovernor(governorProfile, online, nowMs);
+                    }
+                } catch (Exception e) {
+                    plugin.getLogger().atWarning().withCause(e).log("governor tick failed");
+                } finally {
+                    governorWorldTickPending.set(false);
+                }
+            });
+        } catch (RuntimeException e) {
+            governorWorldTickPending.set(false);
+            plugin.getLogger().atFine().withCause(e).log("governor tick not queued — world shutting down");
         }
     }
 
     private void tickGovernor(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs) {
+        GovernorWorldContext.enter();
+        try {
+            tickGovernorOnWorld(profile, online, nowMs);
+        } finally {
+            GovernorWorldContext.exit();
+        }
+    }
+
+    private void tickGovernorOnWorld(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs) {
         long dormancyIntervalMs = dormancyIntervalMs(profile);
         if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= dormancyIntervalMs) {
             dormancyMap.refreshFromPlayers();
@@ -318,7 +386,7 @@ public class MemoryRuntime {
             webhookNotifier.onTier(sample.tier(), sample.heapUsedRatio());
         }
 
-        if (profile.runsHud(config) && hudService != null) {
+        if (RuntimeGuard.active() && profile.runsHud(config) && hudService != null) {
             hudService.refresh(this);
         }
     }

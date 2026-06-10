@@ -1,6 +1,8 @@
 package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.runtime.RuntimeGuard;
+import com.durkz.leancore.runtime.WorldDispatch;
 import com.durkz.leancore.intelligence.UnloadOutcomeTracker;
 import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.component.Ref;
@@ -18,9 +20,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 public class ZoneChunkUnloader {
 
@@ -37,7 +36,7 @@ public class ZoneChunkUnloader {
     }
 
     public int sweep(ZoneDormancyMap dormancyMap, MemoryTier tier) {
-        if (!config.enabled || !config.governEnabled || !config.unloadEnabled) {
+        if (!RuntimeGuard.active() || !config.enabled || !config.governEnabled || !config.unloadEnabled) {
             return 0;
         }
         long nowMs = System.currentTimeMillis();
@@ -59,31 +58,20 @@ public class ZoneChunkUnloader {
 
         int maxChunks = Math.max(1, config.unloadMaxChunksPerSweep);
         List<ChunkTracker> trackers = collectTrackers();
-        List<CompletableFuture<Integer>> pending = new ArrayList<>();
+        int unloaded = 0;
 
         for (Map.Entry<UUID, List<ZoneKey>> entry : byWorld.entrySet()) {
+            if (!RuntimeGuard.active()) {
+                break;
+            }
             World world = Universe.get().getWorld(entry.getKey());
             if (world == null || !world.isAlive()) {
                 continue;
             }
             List<ZoneKey> zones = List.copyOf(entry.getValue());
-            CompletableFuture<Integer> result = new CompletableFuture<>();
-            world.execute(() -> {
-                int[] counter = new int[1];
-                unloadOnWorld(world, zones, trackers, maxChunks, counter);
-                result.complete(counter[0]);
-            });
-            pending.add(result);
-        }
-
-        int unloaded = 0;
-        for (CompletableFuture<Integer> result : pending) {
-            try {
-                unloaded += result.get(2L, TimeUnit.SECONDS);
-            } catch (TimeoutException ignored) {
-                result.cancel(true);
-            } catch (Exception ignored) {
-            }
+            int[] counter = new int[1];
+            WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
+            unloaded += counter[0];
         }
 
         lastSweepMs = nowMs;
@@ -132,6 +120,9 @@ public class ZoneChunkUnloader {
         int regionChunks = ZoneKey.regionChunks();
 
         for (ZoneKey zone : zones) {
+            if (!RuntimeGuard.active()) {
+                return;
+            }
             if (!zone.worldUuid().equals(world.getWorldConfig().getUuid())) {
                 continue;
             }
@@ -139,7 +130,7 @@ public class ZoneChunkUnloader {
             int baseChunkZ = zone.regionZ() * regionChunks;
             for (int dx = 0; dx < regionChunks; dx++) {
                 for (int dz = 0; dz < regionChunks; dz++) {
-                    if (unloadedCounter[0] >= maxChunks) {
+                    if (!RuntimeGuard.active() || unloadedCounter[0] >= maxChunks) {
                         return;
                     }
                     int chunkX = baseChunkX + dx;

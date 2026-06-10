@@ -36,6 +36,11 @@ public class LeanCoreConfig {
     public boolean viewRadiusGovernanceEnabled = false;
     public String preset = "AUTO";
     public boolean dedicatedServerMode = false;
+    /**
+     * Solo embedded: use STANDARD (governor + learning ticks every friendsTickIntervalSeconds)
+     * instead of LITE. Safer than dedicatedServerMode for local dogfood — does not force FULL 5s ticks.
+     */
+    public boolean embeddedStandardProfile = false;
     public boolean dedicatedBootstrapEnabled = true;
     public boolean dedicatedBootstrapApplied = false;
     public int friendsMaxPlayers = 8;
@@ -66,6 +71,10 @@ public class LeanCoreConfig {
 
     public boolean learningEnabled = false;
     public int persistIntervalSeconds = 300;
+    /** Max UUID profiles kept in learning.state; oldest stale entries pruned on flush. 0 = unlimited. */
+    public int learningMaxPersistedPlayers = 512;
+    /** Drop offline player profiles older than this many days. 0 = TTL prune disabled. */
+    public int learningPlayerTtlDays = 90;
 
     public boolean hudFeatureEnabled = false;
     public String[] hudViewerGroups = {"OP", "Admin"};
@@ -176,6 +185,12 @@ public class LeanCoreConfig {
         }
         if (gcHintMinIntervalSeconds <= 0) {
             gcHintMinIntervalSeconds = 600;
+        }
+        if (learningMaxPersistedPlayers < 0) {
+            learningMaxPersistedPlayers = 512;
+        }
+        if (learningPlayerTtlDays < 0) {
+            learningPlayerTtlDays = 90;
         }
         if (hudViewerGroups == null || hudViewerGroups.length == 0) {
             hudViewerGroups = new String[]{"OP", "Admin"};

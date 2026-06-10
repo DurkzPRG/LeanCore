@@ -45,6 +45,9 @@ public final class RuntimeActivationPolicy {
             return playerCount <= 1 ? RuntimeProfile.LITE : RuntimeProfile.STANDARD;
         }
         if (playerCount <= 1) {
+            if (config.embeddedStandardProfile) {
+                return RuntimeProfile.STANDARD;
+            }
             return RuntimeProfile.LITE;
         }
         if (playerCount < config.serverDensePlayerThreshold) {

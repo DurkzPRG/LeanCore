@@ -20,6 +20,8 @@ import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import org.checkerframework.checker.nullness.compatqual.NonNullDecl;
 
+import java.util.Set;
+
 public class LeanCorePlugin extends JavaPlugin {
 
     private static LeanCorePlugin instance;
@@ -96,12 +98,16 @@ public class LeanCorePlugin extends JavaPlugin {
                 }
                 classifier.forget(e.getPlayerRef().getUuid());
                 classifier.syncToStore(learning);
-                learning.flush();
+                learning.flush(true, Set.of(e.getPlayerRef().getUuid()));
             }
         });
         getEventRegistry().registerGlobal(ShutdownEvent.class, e -> {
-            classifier.syncToStore(learning);
-            learning.flush();
+            if (runtime != null) {
+                runtime.shutdown();
+            } else {
+                classifier.syncToStore(learning);
+                learning.flush(true, classifier.features().snapshot().keySet());
+            }
         });
 
         BehaviorSignalSystems.register(getEntityStoreRegistry(), classifier);

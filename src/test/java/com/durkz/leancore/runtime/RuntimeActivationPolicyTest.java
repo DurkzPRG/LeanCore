@@ -21,6 +21,13 @@ class RuntimeActivationPolicyTest {
     }
 
     @Test
+    void embeddedStandardProfileUpgradesSoloFromLite() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.embeddedStandardProfile = true;
+        assertEquals(RuntimeProfile.STANDARD, RuntimeActivationPolicy.resolveProfile(config, 1));
+    }
+
+    @Test
     void dedicatedHostAlwaysFull() {
         LeanCoreConfig config = new LeanCoreConfig();
         config.dedicatedServerMode = true;

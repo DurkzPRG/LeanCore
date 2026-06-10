@@ -16,14 +16,15 @@ import java.util.concurrent.Executors;
 public class CriticalWebhookNotifier {
 
     private final LeanCoreConfig config;
-    private final HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .build();
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "LeanCore-webhook");
         t.setDaemon(true);
         return t;
     });
+    private final HttpClient client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .executor(executor)
+            .build();
 
     private MemoryTier lastTier = MemoryTier.COMFORT;
     private long lastSentMs;

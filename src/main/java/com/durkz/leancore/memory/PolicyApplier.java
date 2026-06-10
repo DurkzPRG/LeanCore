@@ -1,6 +1,8 @@
 package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.runtime.RuntimeGuard;
+import com.durkz.leancore.runtime.WorldDispatch;
 import com.durkz.leancore.intelligence.FalseCutTracker;
 import com.durkz.leancore.intelligence.HeuristicDemandModel;
 import com.durkz.leancore.intelligence.HoldoutSet;
@@ -43,7 +45,7 @@ public class PolicyApplier {
             Map<UUID, RetentionDemand> demands,
             boolean policyChanged
     ) {
-        if (policy == null) {
+        if (policy == null || !RuntimeGuard.active()) {
             return 0;
         }
         if (!policyChanged
@@ -86,7 +88,13 @@ public class PolicyApplier {
                 continue;
             }
             List<PlayerApply> batch = List.copyOf(entry.getValue());
-            world.execute(() -> {
+            if (!RuntimeGuard.active()) {
+                continue;
+            }
+            WorldDispatch.run(world, () -> {
+                if (!RuntimeGuard.active()) {
+                    return;
+                }
                 for (PlayerApply item : batch) {
                     applyOne(item.playerRef(), policy, item.demand());
                 }
