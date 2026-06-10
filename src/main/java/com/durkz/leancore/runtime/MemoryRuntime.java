@@ -9,6 +9,7 @@ import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.EngineUnloadPoller;
 import com.durkz.leancore.intelligence.LearningStore;
+import com.durkz.leancore.memory.GcHintScheduler;
 import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemoryGovernor;
 import com.durkz.leancore.memory.MemoryPressureSensor;
@@ -48,6 +49,7 @@ public class MemoryRuntime {
     private final CriticalWebhookNotifier webhookNotifier;
     private final RegionalPressureCache regionalPressureCache = new RegionalPressureCache();
     private final EngineUnloadPoller engineUnloadPoller = new EngineUnloadPoller();
+    private final GcHintScheduler gcHintScheduler;
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -73,7 +75,8 @@ public class MemoryRuntime {
             MemoryGovernor governor,
             SessionSavingsTracker sessionSavings,
             MemoryHudService hudService,
-            CriticalWebhookNotifier webhookNotifier
+            CriticalWebhookNotifier webhookNotifier,
+            GcHintScheduler gcHintScheduler
     ) {
         this.plugin = plugin;
         this.config = config;
@@ -87,6 +90,7 @@ public class MemoryRuntime {
         this.sessionSavings = sessionSavings;
         this.hudService = hudService;
         this.webhookNotifier = webhookNotifier;
+        this.gcHintScheduler = gcHintScheduler;
     }
 
     public static MemoryRuntime create(
@@ -117,7 +121,8 @@ public class MemoryRuntime {
                 governor,
                 sessionSavings,
                 hudService,
-                webhookNotifier
+                webhookNotifier,
+                new GcHintScheduler(config)
         );
     }
 
@@ -359,7 +364,14 @@ public class MemoryRuntime {
             lastSample = sample;
             lastLiteHeapSampleMs = nowMs;
             lastMode = sessionDetector.detect(sample.onlinePlayers());
+            if (gcHintScheduler.maybeHint(nowMs, soloPlayerIdleSec(), sample.tier(), RuntimeProfile.LITE)) {
+                plugin.getLogger().atFine().log("GC hint issued (LITE idle, tier COMFORT)");
+            }
         }
+    }
+
+    public GcHintScheduler gcHintScheduler() {
+        return gcHintScheduler;
     }
 
     private long soloPlayerIdleSec() {

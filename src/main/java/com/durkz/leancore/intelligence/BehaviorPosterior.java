@@ -44,8 +44,9 @@ public final class BehaviorPosterior {
         double[] raw = new double[PlayerBehavior.values().length];
         raw[PlayerBehavior.MINER.ordinal()] = state.emaMine60();
         raw[PlayerBehavior.LUMBERJACK.ordinal()] = state.emaWood60();
-        raw[PlayerBehavior.FARMER.ordinal()] = state.emaFarm60() + state.emaCraft60() * 0.5D;
+        raw[PlayerBehavior.FARMER.ordinal()] = state.emaFarm60();
         raw[PlayerBehavior.BUILDER.ordinal()] = state.emaBuild60() * 1.2D;
+        raw[PlayerBehavior.CRAFTER.ordinal()] = state.emaCraft60();
         raw[PlayerBehavior.FIGHTER.ordinal()] = state.emaCombat60();
         raw[PlayerBehavior.EXPLORER.ordinal()] = state.emaMovement60() * 0.04D + state.emaZones60() * 2.0D;
         raw[PlayerBehavior.SOCIAL.ordinal()] = Math.max(0.0D, 2.0D - state.activityIndex() * 0.02D);
@@ -112,8 +113,9 @@ public final class BehaviorPosterior {
                 + state.emaBuild60() + state.emaCraft60() + state.emaCombat60() + 1.0D);
         raw[PlayerBehavior.MINER.ordinal()] = state.emaMine60() / norm;
         raw[PlayerBehavior.LUMBERJACK.ordinal()] = state.emaWood60() / norm;
-        raw[PlayerBehavior.FARMER.ordinal()] = (state.emaFarm60() + state.emaCraft60()) / norm;
+        raw[PlayerBehavior.FARMER.ordinal()] = state.emaFarm60() / norm;
         raw[PlayerBehavior.BUILDER.ordinal()] = state.emaBuild60() / norm;
+        raw[PlayerBehavior.CRAFTER.ordinal()] = state.emaCraft60() / norm;
         raw[PlayerBehavior.FIGHTER.ordinal()] = state.emaCombat60() / norm;
         raw[PlayerBehavior.EXPLORER.ordinal()] = (state.emaMovement60() * 0.02D + state.emaZones60()) / norm;
         return raw;

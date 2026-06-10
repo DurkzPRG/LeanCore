@@ -4,7 +4,6 @@ import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.dormancy.ZoneKey;
 import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.intelligence.PlayerBehavior;
-import com.durkz.leancore.intelligence.PlayerFeatureState;
 import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.memory.MemorySnapshot;
 import com.durkz.leancore.memory.MemoryTier;
@@ -80,21 +79,7 @@ public final class LeanCoreAPI {
                 playerId,
                 runtime.learningStore().demandFor(playerId)
         );
-        PlayerFeatureState features = runtime.classifier().features().snapshot().get(playerId);
         PlayerBehavior label = demand.debugLabel();
-        if (features == null) {
-            return Optional.of(new LeanCoreSnapshot(
-                    sample.tier(),
-                    sample.heapUsedRatio(),
-                    sample.onlinePlayers(),
-                    playerId,
-                    demand.demand(),
-                    demand.confidence(),
-                    demand.retentionMb(),
-                    label,
-                    HoldoutSet.isHoldout(playerId)
-            ));
-        }
         return Optional.of(new LeanCoreSnapshot(
                 sample.tier(),
                 sample.heapUsedRatio(),

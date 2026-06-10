@@ -38,6 +38,16 @@ class BehaviorPosteriorTest {
     }
 
     @Test
+    void craftEmasSkewCrafterNotFarmer() {
+        PlayerFeatureState state = new PlayerFeatureState(UUID.randomUUID());
+        for (int i = 0; i < 20; i++) {
+            state.onCraft();
+        }
+        PlayerBehavior label = BehaviorPosterior.topLabelFromActivityEmas(state, System.currentTimeMillis());
+        assertEquals(PlayerBehavior.CRAFTER, label);
+    }
+
+    @Test
     void scoresSumToOneFromModel() {
         ActivityClassifierModel model = new ActivityClassifierModel();
         model.train(ActionKind.MINE);

@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class LearningStore {
 
-    static final int SCHEMA_VERSION = 5;
+    static final int SCHEMA_VERSION = 6;
     private static final String STATE_FILE = "learning.state";
 
     private final Path dataDir;
@@ -251,7 +251,7 @@ public class LearningStore {
             Files.createDirectories(dataDir);
             Path target = dataDir.resolve(STATE_FILE);
             try (OutputStream out = Files.newOutputStream(target)) {
-                props.store(out, "LeanCore learning v5");
+                props.store(out, "LeanCore learning v6");
             }
             flushCount++;
             flushedGeneration = stateGeneration;
@@ -262,7 +262,7 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v5 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
+                "learning=v6 enabled=%s flushes=%d players=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
                 config.learningEnabled,
                 flushCount,
                 players.size(),
@@ -339,7 +339,7 @@ public class LearningStore {
                     readInt(props, "unload.engine", 0)
             );
         }
-        if (schema >= 4) {
+        if (schema >= 6) {
             loadActivityModel(props);
         }
         if (schema >= 5) {

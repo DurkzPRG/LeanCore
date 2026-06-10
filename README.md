@@ -75,7 +75,7 @@ File: `mods/durkz_LeanCore/data/LeanCore.json`
 | `dedicatedServerMode` | `false` | Force FULL profile |
 | `dedicatedBootstrapEnabled` | `true` | One-time preset on first dedicated boot: enables govern, view-radius, learning |
 
-Learning snapshot: `mods/durkz_LeanCore/data/learning.state` (schema v5)
+Learning snapshot: `mods/durkz_LeanCore/data/learning.state` (schema v6)
 
 Permissions: `durkz.leancore.hud`, `durkz.leancore.admin`
 

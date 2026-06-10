@@ -6,6 +6,7 @@ public enum PlayerBehavior {
     LUMBERJACK,
     FARMER,
     BUILDER,
+    CRAFTER,
     FIGHTER,
     AFK,
     SOCIAL,

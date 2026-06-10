@@ -16,7 +16,7 @@ public enum ActionKind {
             case CHOP -> PlayerBehavior.LUMBERJACK;
             case FARM -> PlayerBehavior.FARMER;
             case BUILD -> PlayerBehavior.BUILDER;
-            case CRAFT -> PlayerBehavior.FARMER;
+            case CRAFT -> PlayerBehavior.CRAFTER;
             case COMBAT -> PlayerBehavior.FIGHTER;
             case EXPLORE -> PlayerBehavior.EXPLORER;
             case UNKNOWN -> PlayerBehavior.UNKNOWN;

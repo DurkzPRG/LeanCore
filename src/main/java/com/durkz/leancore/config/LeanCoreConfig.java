@@ -77,6 +77,10 @@ public class LeanCoreConfig {
     public String criticalWebhookUrl = "";
     public int criticalWebhookCooldownSeconds = 300;
 
+    /** LITE + COMFORT + solo idle only. Off by default — experimental for 1.4.x tuning. */
+    public boolean gcHintEnabled = false;
+    public int gcHintMinIntervalSeconds = 600;
+
     public static LeanCoreConfig load(Path dataDirectory) {
         File directory = dataDirectory.toFile();
         if (!directory.exists()) {
@@ -169,6 +173,9 @@ public class LeanCoreConfig {
         }
         if (criticalWebhookCooldownSeconds <= 0) {
             criticalWebhookCooldownSeconds = 300;
+        }
+        if (gcHintMinIntervalSeconds <= 0) {
+            gcHintMinIntervalSeconds = 600;
         }
         if (hudViewerGroups == null || hudViewerGroups.length == 0) {
             hudViewerGroups = new String[]{"OP", "Admin"};

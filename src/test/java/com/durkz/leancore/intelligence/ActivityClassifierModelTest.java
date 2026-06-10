@@ -29,4 +29,17 @@ class ActivityClassifierModelTest {
         assertEquals(PlayerBehavior.MINER, model.topLabel(state, System.currentTimeMillis()));
         assertTrue(model.updates() >= 12);
     }
+
+    @Test
+    void learnsCrafterLabelAfterCraftEvents() {
+        ActivityClassifierModel model = new ActivityClassifierModel();
+        for (int i = 0; i < 12; i++) {
+            model.train(ActionKind.CRAFT);
+        }
+        PlayerFeatureState state = new PlayerFeatureState(UUID.randomUUID());
+        for (int i = 0; i < 20; i++) {
+            state.onCraft();
+        }
+        assertEquals(PlayerBehavior.CRAFTER, model.topLabel(state, System.currentTimeMillis()));
+    }
 }
