@@ -25,6 +25,7 @@ public final class SavingsReport {
             UnloadOutcomeTracker unloadTracker,
             GcHintScheduler gcHint,
             long viewRadiusGraceUntilMs,
+            long liteSessionStartedMs,
             long nowMs
     ) {
         List<Line> lines = new ArrayList<>();
@@ -84,23 +85,33 @@ public final class SavingsReport {
         }
 
         lines.add(new Line("--- Governor ---", "#888888"));
-        boolean governorConfigured = config.governEnabled;
-        boolean governorRunning = governor != null && governor.enabled();
         boolean liteProfile = profile == RuntimeProfile.LITE;
+        boolean liteGovernorConfigured = liteProfile && config.liteMemoryGovernorEnabled;
+        boolean standardGovernorConfigured = !liteProfile && config.governEnabled;
+        boolean governorConfigured = liteGovernorConfigured || standardGovernorConfigured;
+        boolean governorRunning = governor != null && governor.enabled();
 
-        if (liteProfile) {
-            lines.add(new Line("profile LITE: governor tick not active on embedded solo", "#FFAA00"));
-        } else if (!governorConfigured) {
+        if (liteProfile && !config.liteMemoryGovernorEnabled) {
+            lines.add(new Line("lite governor OFF (liteMemoryGovernorEnabled=false)", "#FF8888"));
+        } else if (!liteProfile && !governorConfigured) {
             lines.add(new Line("governor OFF (governEnabled=false in LeanCore.json)", "#FF8888"));
-        } else if (!governorRunning) {
-            lines.add(new Line("governor configured but idle this tick", "#FFAA00"));
-        } else {
+        } else if (governorConfigured && !governorRunning) {
+            if (liteProfile) {
+                lines.add(new Line(String.format(Locale.ROOT,
+                        "lite governor waiting for heap sample (every %ds)",
+                        Math.max(15, config.soloHeapSampleIntervalSeconds)), "#FFAA00"));
+            } else {
+                lines.add(new Line("governor configured but idle this tick", "#FFAA00"));
+            }
+        } else if (governorRunning) {
             String policy = governor.policy() != null ? governor.policy().key() : "none";
             String view = governor.policy() != null
                     ? String.format(Locale.ROOT, "%.0f%%", governor.policy().viewScale() * 100.0D)
                     : "n/a";
+            String label = liteProfile ? "lite governor ON" : "governor ON";
             lines.add(new Line(String.format(Locale.ROOT,
-                    "governor ON | preset %s | policy %s | view %s | tier %s",
+                    "%s | preset %s | policy %s | view %s | tier %s",
+                    label,
                     governor.preset(),
                     policy,
                     view,
@@ -111,11 +122,20 @@ public final class SavingsReport {
             }
         }
 
-        lines.add(new Line(String.format(Locale.ROOT,
-                "viewRadiusGovernance=%s | learning=%s | unload=%s",
-                config.viewRadiusGovernanceEnabled,
-                config.learningEnabled,
-                config.unloadEnabled), "#888888"));
+        if (liteProfile) {
+            lines.add(new Line(String.format(Locale.ROOT,
+                    "liteGov=%s liteView=%s liteLearning=%s | unload=%s",
+                    config.liteMemoryGovernorEnabled,
+                    config.liteViewRadiusEnabled,
+                    config.liteLearningEnabled,
+                    config.unloadEnabled), "#888888"));
+        } else {
+            lines.add(new Line(String.format(Locale.ROOT,
+                    "viewRadiusGovernance=%s | learning=%s | unload=%s",
+                    config.viewRadiusGovernanceEnabled,
+                    config.learningEnabled,
+                    config.unloadEnabled), "#888888"));
+        }
         if (config.dedicatedBootstrapApplied) {
             lines.add(new Line("dedicatedBootstrap=applied (one-time preset on first dedicated boot)", "#888888"));
         }
@@ -123,6 +143,19 @@ public final class SavingsReport {
             lines.add(new Line(String.format(Locale.ROOT,
                     "view-radius grace: cuts blocked for %s more",
                     formatDuration(viewRadiusGraceUntilMs - nowMs)), "#FFAA00"));
+        }
+        if (liteProfile
+                && config.liteViewRadiusEnabled
+                && config.liteMemoryGovernorEnabled
+                && liteSessionStartedMs > 0L
+                && config.liteViewRadiusLoginGraceSeconds > 0) {
+            long graceMs = config.liteViewRadiusLoginGraceSeconds * 1000L;
+            long elapsedMs = nowMs - liteSessionStartedMs;
+            if (elapsedMs < graceMs) {
+                lines.add(new Line(String.format(Locale.ROOT,
+                        "lite view-radius grace: cuts blocked for %s more",
+                        formatDuration(graceMs - elapsedMs)), "#FFAA00"));
+            }
         }
 
         lines.add(new Line("--- Session actions (cumulative) ---", "#888888"));
@@ -150,7 +183,9 @@ public final class SavingsReport {
             lines.add(new Line("boot grace (<60s): baseline still stabilizing", "#FFAA00"));
         }
 
-        if (liteProfile || !governorConfigured || !session.governorEverActive()) {
+        if ((liteProfile && !config.liteMemoryGovernorEnabled)
+                || (!liteProfile && !governorConfigured)
+                || !session.governorEverActive()) {
             lines.add(new Line("heap delta is OBSERVED ONLY — not attributed to LeanCore policy", "#FF8888"));
             if (!liteProfile && !governorConfigured) {
                 lines.add(new Line("set governEnabled=true (and viewRadiusGovernanceEnabled) to apply cuts", "#888888"));

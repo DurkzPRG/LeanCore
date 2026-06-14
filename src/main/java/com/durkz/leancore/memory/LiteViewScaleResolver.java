@@ -14,6 +14,12 @@ public final class LiteViewScaleResolver {
     private LiteViewScaleResolver() {
     }
 
+    public static GovernorPolicy policyFor(LeanCoreConfig config, MemoryTier tier, double chunkSaturation) {
+        GovernorPolicy base = GovernorPolicy.forTier(GovernorPreset.SOLO_LEAN, tier);
+        double scale = resolvePolicyViewScale(config, tier, chunkSaturation);
+        return new GovernorPolicy(GovernorPreset.SOLO_LEAN, tier, scale, base.demoteBatch());
+    }
+
     public static double resolvePolicyViewScale(
             LeanCoreConfig config,
             MemoryTier tier,

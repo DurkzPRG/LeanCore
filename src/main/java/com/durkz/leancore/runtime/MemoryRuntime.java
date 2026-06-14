@@ -19,6 +19,7 @@ import com.durkz.leancore.memory.PolicyApplier;
 import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
+import com.durkz.leancore.probe.ChunkSaturationSampler;
 import com.durkz.leancore.probe.RegionalPressureCache;
 import com.durkz.leancore.ui.HudSessionStore;
 import com.durkz.leancore.ui.MemoryHudService;
@@ -50,6 +51,7 @@ public class MemoryRuntime {
     private final RegionalPressureCache regionalPressureCache = new RegionalPressureCache();
     private final EngineUnloadPoller engineUnloadPoller = new EngineUnloadPoller();
     private final GcHintScheduler gcHintScheduler;
+    private ChunkSaturationSampler chunkSaturationSampler;
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -67,6 +69,7 @@ public class MemoryRuntime {
     private double lastLiteZ;
     private boolean lastLitePositioned;
     private long lastDeferredGovernorLogMs;
+    private long liteSessionStartedMs;
 
     public MemoryRuntime(
             LeanCorePlugin plugin,
@@ -136,6 +139,8 @@ public class MemoryRuntime {
         shutdownDone = false;
         scheduler = newScheduler();
         running = true;
+        liteSessionStartedMs = System.currentTimeMillis();
+        chunkSaturationSampler = new ChunkSaturationSampler(() -> Universe.get().getPlayers());
         int playerCount = Universe.get().getPlayers().size();
         activeProfile = RuntimeActivationPolicy.resolveProfile(config, playerCount);
         if (activeProfile == null) {
@@ -460,6 +465,74 @@ public class MemoryRuntime {
             if (gcHintScheduler.maybeHint(nowMs, soloPlayerIdleSec(), sample.tier(), RuntimeProfile.LITE)) {
                 plugin.getLogger().atFine().log("GC hint issued (LITE idle, tier COMFORT)");
             }
+            queueLiteGovernorTick(online, nowMs);
+        }
+    }
+
+    private void queueLiteGovernorTick(Collection<PlayerRef> online, long nowMs) {
+        if (!activeProfile.runsLiteGovernor(config)) {
+            return;
+        }
+        World world = resolvePrimaryWorld(online);
+        if (world == null) {
+            return;
+        }
+        if (!governorWorldTickPending.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            world.execute(() -> {
+                try {
+                    if (running) {
+                        tickLiteGovernorOnWorld(nowMs);
+                    }
+                } catch (Exception e) {
+                    plugin.getLogger().atWarning().withCause(e).log("lite governor tick failed");
+                } finally {
+                    governorWorldTickPending.set(false);
+                }
+            });
+        } catch (RuntimeException e) {
+            governorWorldTickPending.set(false);
+            plugin.getLogger().atFine().withCause(e).log("lite governor tick not queued — world shutting down");
+        }
+    }
+
+    private void tickLiteGovernorOnWorld(long nowMs) {
+        GovernorWorldContext.enter();
+        try {
+            MemorySnapshot sample = lastSample;
+            if (sample == null) {
+                return;
+            }
+            var demands = classifier.snapshotDemands(nowMs);
+            double chunkSaturation = sampleChunkSaturation();
+            governor.tickLiteMode(
+                    sample,
+                    demands,
+                    dormancyMap,
+                    chunkSaturation,
+                    liteSessionStartedMs,
+                    nowMs
+            );
+            GovernorStatus govStatus = governor.status();
+            if (govStatus.enabled()) {
+                sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
+            }
+        } finally {
+            GovernorWorldContext.exit();
+        }
+    }
+
+    private double sampleChunkSaturation() {
+        if (chunkSaturationSampler == null) {
+            return 0.0D;
+        }
+        try {
+            return chunkSaturationSampler.sample();
+        } catch (Exception error) {
+            plugin.getLogger().atFine().withCause(error).log("chunk saturation sample failed");
+            return 0.0D;
         }
     }
 
@@ -538,6 +611,10 @@ public class MemoryRuntime {
 
     public long viewRadiusGraceUntilMs() {
         return governor.viewRadiusGraceUntilMs();
+    }
+
+    public long liteSessionStartedMs() {
+        return liteSessionStartedMs;
     }
 
     public MemoryHudService hudService() {

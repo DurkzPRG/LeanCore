@@ -2,6 +2,7 @@ package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.runtime.RuntimeGuard;
+import com.durkz.leancore.runtime.RuntimeProfile;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.HoldoutSet;
@@ -106,6 +107,55 @@ public class MemoryGovernor {
         );
     }
 
+    public void tickLiteMode(
+            MemorySnapshot sample,
+            Map<UUID, RetentionDemand> demands,
+            ZoneDormancyMap dormancyMap,
+            double chunkSaturation,
+            long liteSessionStartedMs,
+            long nowMs
+    ) {
+        if (!config.enabled || !config.liteMemoryGovernorEnabled || !RuntimeGuard.active()) {
+            lastStatus = GovernorStatus.idle();
+            return;
+        }
+
+        checkLiteRollback(sample);
+
+        GovernorPolicy pressurePolicy = LiteViewScaleResolver.policyFor(config, sample.tier(), chunkSaturation);
+        int demotedZones = 0;
+        if (pressurePolicy.demoteBatch() > 0) {
+            demotedZones = dormancyMap.demoteFarthestDormant(pressurePolicy.demoteBatch());
+        }
+
+        GovernorPolicy toApply = chooseLitePolicy(pressurePolicy, nowMs);
+        int scheduled = 0;
+        if (toApply != null) {
+            if (shouldApplyViewRadiusLite(sample, liteSessionStartedMs, nowMs)) {
+                Collection<PlayerRef> online = Universe.get().getPlayers();
+                boolean policyChanged = !sameLitePolicy(activePolicy, toApply);
+                scheduled = applier.apply(toApply, online, demands, policyChanged, RuntimeProfile.LITE);
+            }
+            commitLitePolicy(toApply, sample, nowMs);
+        }
+
+        long since = lastChangeMs <= 0L ? 0L : (nowMs - lastChangeMs) / 1000L;
+        lastStatus = new GovernorStatus(
+                true,
+                GovernorPreset.SOLO_LEAN,
+                activePolicy,
+                scheduled,
+                demotedZones,
+                0,
+                0,
+                0,
+                0,
+                0,
+                rolledBack,
+                since
+        );
+    }
+
     public GovernorStatus status() {
         return lastStatus;
     }
@@ -142,6 +192,50 @@ public class MemoryGovernor {
         rolledBack = true;
         lastChangeMs = System.currentTimeMillis();
         heapAtChange = sample.heapUsedRatio();
+    }
+
+    private void checkLiteRollback(MemorySnapshot sample) {
+        if (activePolicy == null || lastChangeMs <= 0L || previousPolicy == null) {
+            return;
+        }
+        long elapsedMs = System.currentTimeMillis() - lastChangeMs;
+        if (elapsedMs > config.rollbackWindowSec * 1000L) {
+            return;
+        }
+        if (sample.heapUsedRatio() <= heapAtChange + config.rollbackHeapDelta) {
+            return;
+        }
+
+        activePolicy = previousPolicy;
+        rolledBack = true;
+        lastChangeMs = System.currentTimeMillis();
+        heapAtChange = sample.heapUsedRatio();
+    }
+
+    private GovernorPolicy chooseLitePolicy(GovernorPolicy pressurePolicy, long nowMs) {
+        if (activePolicy == null) {
+            return pressurePolicy;
+        }
+        if (!activePolicy.key().equals(pressurePolicy.key())) {
+            long elapsedSec = lastChangeMs <= 0L
+                    ? config.policyChangeMinIntervalSec
+                    : (nowMs - lastChangeMs) / 1000L;
+            if (elapsedSec < config.policyChangeMinIntervalSec) {
+                return activePolicy;
+            }
+        }
+        return pressurePolicy;
+    }
+
+    private void commitLitePolicy(GovernorPolicy toApply, MemorySnapshot sample, long nowMs) {
+        if (sameLitePolicy(activePolicy, toApply)) {
+            return;
+        }
+        previousPolicy = activePolicy;
+        activePolicy = toApply;
+        lastChangeMs = nowMs;
+        heapAtChange = sample.heapUsedRatio();
+        rolledBack = false;
     }
 
     private GovernorPolicy choosePolicy(
@@ -241,7 +335,25 @@ public class MemoryGovernor {
         );
     }
 
+    private boolean shouldApplyViewRadiusLite(MemorySnapshot sample, long liteSessionStartedMs, long nowMs) {
+        return ViewRadiusGovernance.shouldApply(
+                config,
+                RuntimeProfile.LITE,
+                sample.onlinePlayers(),
+                viewRadiusGraceActive(nowMs),
+                nowMs,
+                liteSessionStartedMs
+        );
+    }
+
     private static boolean samePolicy(GovernorPolicy a, GovernorPolicy b) {
         return a != null && b != null && a.key().equals(b.key());
+    }
+
+    private static boolean sameLitePolicy(GovernorPolicy a, GovernorPolicy b) {
+        return a != null
+                && b != null
+                && a.key().equals(b.key())
+                && Double.compare(a.viewScale(), b.viewScale()) == 0;
     }
 }

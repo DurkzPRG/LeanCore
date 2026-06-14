@@ -2,6 +2,7 @@ package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.runtime.RuntimeGuard;
+import com.durkz.leancore.runtime.RuntimeProfile;
 import com.durkz.leancore.runtime.WorldDispatch;
 import com.durkz.leancore.intelligence.FalseCutTracker;
 import com.durkz.leancore.intelligence.HeuristicDemandModel;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -45,12 +47,23 @@ public class PolicyApplier {
             Map<UUID, RetentionDemand> demands,
             boolean policyChanged
     ) {
+        return apply(policy, online, demands, policyChanged, null);
+    }
+
+    public int apply(
+            GovernorPolicy policy,
+            Collection<PlayerRef> online,
+            Map<UUID, RetentionDemand> demands,
+            boolean policyChanged,
+            RuntimeProfile profile
+    ) {
         if (policy == null || !RuntimeGuard.active()) {
             return 0;
         }
+        String applyKey = applyKey(policy, profile);
         if (!policyChanged
                 && lastAppliedPolicyKey != null
-                && policy.key().equals(lastAppliedPolicyKey)) {
+                && applyKey.equals(lastAppliedPolicyKey)) {
             return 0;
         }
 
@@ -96,7 +109,7 @@ public class PolicyApplier {
                     return;
                 }
                 for (PlayerApply item : batch) {
-                    applyOne(item.playerRef(), policy, item.demand());
+                    applyOne(item.playerRef(), policy, item.demand(), profile);
                 }
             });
             scheduled += batch.size();
@@ -104,12 +117,27 @@ public class PolicyApplier {
 
         if (scheduled > 0) {
             lastApplyMs = nowMs;
-            lastAppliedPolicyKey = policy.key();
+            lastAppliedPolicyKey = applyKey;
         }
         return scheduled;
     }
 
-    private void applyOne(PlayerRef playerRef, GovernorPolicy policy, RetentionDemand demand) {
+    private static String applyKey(GovernorPolicy policy, RuntimeProfile profile) {
+        if (profile == RuntimeProfile.LITE) {
+            return "LITE:"
+                    + policy.key()
+                    + "@"
+                    + String.format(Locale.ROOT, "%.4f", policy.viewScale());
+        }
+        return policy.key();
+    }
+
+    private void applyOne(
+            PlayerRef playerRef,
+            GovernorPolicy policy,
+            RetentionDemand demand,
+            RuntimeProfile profile
+    ) {
         Ref<EntityStore> ref = playerRef.getReference();
         if (ref == null) {
             return;
@@ -126,9 +154,12 @@ public class PolicyApplier {
         }
 
         int current = player.getClientViewRadius();
-        int target = targetRadius(player, policy, demand);
+        int target = targetRadius(player, policy, demand, profile);
 
         if (HoldoutSet.isHoldout(playerId) && target < current) {
+            return;
+        }
+        if (profile == RuntimeProfile.LITE && target < current && HeuristicDemandModel.isHighDemand(demand.demand())) {
             return;
         }
         if (target < current && HeuristicDemandModel.isHighDemand(demand.demand())) {
@@ -142,10 +173,29 @@ public class PolicyApplier {
         player.setClientViewRadius(target);
     }
 
-    private int targetRadius(Player player, GovernorPolicy policy, RetentionDemand demand) {
-        int serverRadius = Math.max(1, player.getViewRadius());
+    private int targetRadius(Player player, GovernorPolicy policy, RetentionDemand demand, RuntimeProfile profile) {
+        return resolveTargetClientRadius(
+                config,
+                profile,
+                player.getViewRadius(),
+                policy,
+                demand
+        );
+    }
+
+    static int resolveTargetClientRadius(
+            LeanCoreConfig config,
+            RuntimeProfile profile,
+            int serverViewRadius,
+            GovernorPolicy policy,
+            RetentionDemand demand
+    ) {
+        int serverRadius = Math.max(1, serverViewRadius);
         int scaled = (int) Math.round(serverRadius * policy.viewScale() * demand.viewScale());
-        return clamp(scaled, config.minClientViewRadius, config.maxClientViewRadius);
+        int minClient = profile == RuntimeProfile.LITE
+                ? Math.max(config.minClientViewRadius, config.liteMinClientViewRadius)
+                : config.minClientViewRadius;
+        return clamp(scaled, minClient, config.maxClientViewRadius);
     }
 
     private static int clamp(int value, int min, int max) {

@@ -209,6 +209,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     rt.learningStore().unloadOutcomeTracker(),
                     rt.gcHintScheduler(),
                     rt.viewRadiusGraceUntilMs(),
+                    rt.liteSessionStartedMs(),
                     nowMs
             )) {
                 say(ctx, line.text(), line.color());

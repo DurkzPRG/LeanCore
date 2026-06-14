@@ -30,6 +30,10 @@ public enum RuntimeProfile {
         };
     }
 
+    public boolean runsLiteGovernor(LeanCoreConfig config) {
+        return this == LITE && config.liteMemoryGovernorEnabled;
+    }
+
     public boolean runsLearning(LeanCoreConfig config) {
         return switch (this) {
             case LITE -> false;
@@ -45,6 +49,6 @@ public enum RuntimeProfile {
     }
 
     public boolean tracksPlayerMotion() {
-        return this != LITE;
+        return true;
     }
 }

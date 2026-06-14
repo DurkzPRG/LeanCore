@@ -29,6 +29,7 @@ class SavingsReportTest {
                 new UnloadOutcomeTracker(),
                 new GcHintScheduler(config),
                 0L,
+                0L,
                 now + 2000L
         ));
 
@@ -73,6 +74,7 @@ class SavingsReportTest {
                 new UnloadOutcomeTracker(),
                 new GcHintScheduler(config),
                 0L,
+                0L,
                 now + 5000L
         ));
 
@@ -98,11 +100,58 @@ class SavingsReportTest {
                 new UnloadOutcomeTracker(),
                 new GcHintScheduler(config),
                 0L,
+                0L,
                 now + 1000L
         ));
 
         assertTrue(output.contains("GC hint"));
         assertTrue(output.contains("gcHintEnabled=false"));
+        assertTrue(output.contains("lite governor waiting"));
+    }
+
+    @Test
+    void reportsLiteGovernorOn() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.liteMemoryGovernorEnabled = true;
+
+        SessionSavingsTracker session = new SessionSavingsTracker();
+        long now = System.currentTimeMillis();
+        session.noteHeapSample(mb(3000), mb(4000), now);
+        session.noteGovernorTick(0, 0);
+
+        GovernorPolicy policy = LiteViewScaleResolver.policyFor(config, MemoryTier.COMFORT, 0.5D);
+        GovernorStatus governor = new GovernorStatus(
+                true,
+                GovernorPreset.SOLO_LEAN,
+                policy,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                false,
+                30L
+        );
+
+        MemorySnapshot current = new MemorySnapshot(mb(2200), mb(4000), 0.55D, 1, 0.0D, MemoryTier.COMFORT);
+        String output = join(SavingsReport.format(
+                current,
+                session,
+                governor,
+                config,
+                RuntimeProfile.LITE,
+                new UnloadOutcomeTracker(),
+                new GcHintScheduler(config),
+                0L,
+                now - 120_000L,
+                now
+        ));
+
+        assertTrue(output.contains("lite governor ON"));
+        assertTrue(output.contains("view 100%"));
+        assertTrue(output.contains("liteGov=true"));
     }
 
     @Test
@@ -126,6 +175,7 @@ class SavingsReportTest {
                 RuntimeProfile.LITE,
                 new UnloadOutcomeTracker(),
                 scheduler,
+                0L,
                 0L,
                 now
         ));
@@ -153,6 +203,7 @@ class SavingsReportTest {
                 RuntimeProfile.STANDARD,
                 new UnloadOutcomeTracker(),
                 new GcHintScheduler(config),
+                0L,
                 0L,
                 now + 1000L
         ));

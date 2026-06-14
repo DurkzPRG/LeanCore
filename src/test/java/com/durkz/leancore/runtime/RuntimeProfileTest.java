@@ -22,6 +22,22 @@ class RuntimeProfileTest {
     }
 
     @Test
+    void liteRunsLiteGovernorWhenEnabled() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.liteMemoryGovernorEnabled = true;
+        assertTrue(RuntimeProfile.LITE.runsLiteGovernor(config));
+        config.liteMemoryGovernorEnabled = false;
+        assertFalse(RuntimeProfile.LITE.runsLiteGovernor(config));
+        assertFalse(RuntimeProfile.STANDARD.runsLiteGovernor(config));
+    }
+
+    @Test
+    void liteTracksPlayerMotion() {
+        assertTrue(RuntimeProfile.LITE.tracksPlayerMotion());
+        assertTrue(RuntimeProfile.STANDARD.tracksPlayerMotion());
+    }
+
+    @Test
     void standardHonorsConfigFlags() {
         LeanCoreConfig config = new LeanCoreConfig();
         config.governEnabled = true;
