@@ -24,12 +24,18 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class LearningStore {
 
+    @FunctionalInterface
+    public interface PersistListener {
+        void onWarning(String message, Throwable cause);
+    }
+
     static final int SCHEMA_VERSION = 7;
     private static final String STATE_FILE_LEGACY = "learning.state";
     private static final long HEAP_DIRTY_INTERVAL_MS = 60_000L;
 
     private final Path dataDir;
     private final LeanCoreConfig config;
+    private final PersistListener persistListener;
     private final Map<UUID, PersistedPlayer> players = new ConcurrentHashMap<>();
     private final RollingHeapTracker heapWindows = new RollingHeapTracker();
     private final ServerContextTracker serverContext;
@@ -45,15 +51,22 @@ public class LearningStore {
     private volatile double regionalPressure;
     private MemoryTier lastTier = MemoryTier.COMFORT;
     private int flushCount;
+    private int persistFailCount;
     private int lastPrunedCount;
     private long lastStateFileBytes;
+    private long lastFlushAtMs;
     private long lastHeapDirtyMs;
     private volatile long stateGeneration;
     private volatile long flushedGeneration;
 
     public LearningStore(Path dataDir, LeanCoreConfig config) {
+        this(dataDir, config, null);
+    }
+
+    public LearningStore(Path dataDir, LeanCoreConfig config, PersistListener persistListener) {
         this.dataDir = dataDir;
         this.config = config;
+        this.persistListener = persistListener;
         this.serverContext = new ServerContextTracker(config);
         this.policyBandit = new PolicyBandit();
         this.falseCutTracker = new FalseCutTracker();
@@ -252,7 +265,10 @@ public class LearningStore {
             lastStateFileBytes = Files.size(target);
             flushCount++;
             flushedGeneration = stateGeneration;
-        } catch (IOException ignored) {
+            lastFlushAtMs = now;
+        } catch (IOException ex) {
+            persistFailCount++;
+            warnPersist("learning flush failed", ex);
         }
     }
 
@@ -376,9 +392,11 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v7 enabled=%s flushes=%d players=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
+                "learning=v7 enabled=%s flushes=%d flushErr=%d lastFlush=%s players=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
                 config.learningEnabled,
                 flushCount,
+                persistFailCount,
+                formatLastFlush(now),
                 players.size(),
                 formatStateSize(lastStateFileBytes),
                 lastPrunedCount,
@@ -388,6 +406,27 @@ public class LearningStore {
                 outcomeTracker.discarded(),
                 falseCutTracker.sessionCuts(),
                 policyBlacklist.activeCount(now));
+    }
+
+    private String formatLastFlush(long nowMs) {
+        if (lastFlushAtMs <= 0L) {
+            return "never";
+        }
+        long ageSec = Math.max(0L, (nowMs - lastFlushAtMs) / 1000L);
+        if (ageSec < 120L) {
+            return ageSec + "s ago";
+        }
+        if (ageSec < 7200L) {
+            return (ageSec / 60L) + "m ago";
+        }
+        return (ageSec / 3600L) + "h ago";
+    }
+
+    private void warnPersist(String message, Throwable cause) {
+        if (persistListener == null) {
+            return;
+        }
+        persistListener.onWarning(message, cause);
     }
 
     private static String formatStateSize(long bytes) {
@@ -444,7 +483,8 @@ public class LearningStore {
                 applySnapshot(LearningStateCodec.readFrom(in), nowMs);
                 lastStateFileBytes = Files.size(gzip);
                 return;
-            } catch (IOException ignored) {
+            } catch (IOException ex) {
+                warnPersist("learning state v7 load failed; trying legacy", ex);
             }
         }
         loadLegacyProperties(nowMs);

@@ -83,7 +83,8 @@ public class LeanCorePlugin extends JavaPlugin {
             return;
         }
 
-        LearningStore learning = new LearningStore(getDataDirectory(), config);
+        LearningStore learning = new LearningStore(getDataDirectory(), config,
+                (message, cause) -> getLogger().atWarning().withCause(cause).log("%s", message));
         BehaviorClassifier classifier = new BehaviorClassifier(learning);
 
         getEventRegistry().registerGlobal(PlayerConnectEvent.class, e -> {
