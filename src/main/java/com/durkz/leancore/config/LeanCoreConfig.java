@@ -54,6 +54,10 @@ public class LeanCoreConfig {
     public int dormancyRefreshIntervalSeconds = 15;
     public int minViewRadiusDelta = 2;
     public boolean unloadEnabled = false;
+    /** When unloadEnabled, block sweeps until /leancore probe passes. Set false to override. */
+    public boolean unloadProbeGateEnabled = true;
+    /** Set when probe S1-S5 pass; persisted in LeanCore.json. */
+    public long probePassedAtMs = 0L;
     /** Poll loaded-chunk deltas on the world thread; do not register ChunkUnloadEvent listeners. */
     public boolean chunkUnloadEventTracking = false;
     public int unloadMinIntervalSeconds = 5;

@@ -66,6 +66,12 @@ public final class HoldoutCohortTracker {
     }
 
     public String statusLine(long nowMs) {
+        if (holdoutOnline <= 0 || treatmentOnline + holdoutOnline < 2) {
+            return String.format(Locale.ROOT,
+                    "holdout cohort n/a (need 2+ online; treatment=%d holdout=%d)",
+                    treatmentOnline,
+                    holdoutOnline);
+        }
         double treatmentAvg = treatmentHeap60s(nowMs);
         double holdoutAvg = holdoutHeap60s(nowMs);
         double deltaPp = (holdoutAvg - treatmentAvg) * 100.0D;

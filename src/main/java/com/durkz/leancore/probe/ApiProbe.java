@@ -38,6 +38,27 @@ public final class ApiProbe {
         return out;
     }
 
+    /** True when every probe step reports ok (no fail or skip). */
+    public static boolean passed(List<String> lines) {
+        if (lines == null || lines.size() <= 1) {
+            return false;
+        }
+        boolean sawStep = false;
+        for (String line : lines) {
+            if (line == null || line.startsWith("probe:")) {
+                continue;
+            }
+            sawStep = true;
+            if (line.contains(": fail") || line.contains(": skip")) {
+                return false;
+            }
+            if (!line.contains(": ok")) {
+                return false;
+            }
+        }
+        return sawStep;
+    }
+
     private static String s1(Store<EntityStore> store, Ref<EntityStore> ref) {
         if (ref == null) {
             return "S1 view-radius: fail (no entity ref)";

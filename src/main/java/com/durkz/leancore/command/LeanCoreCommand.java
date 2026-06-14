@@ -14,6 +14,7 @@ import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemorySnapshot;
 import com.durkz.leancore.memory.SavingsReport;
 import com.durkz.leancore.probe.ApiProbe;
+import com.durkz.leancore.probe.UnloadProbeGate;
 import com.durkz.leancore.runtime.MemoryRuntime;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
@@ -122,6 +123,15 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             say(ctx, rt.learningStore().statusLine(), "#888888");
             say(ctx, rt.learningStore().windowLine(), "#888888");
             say(ctx, rt.learningStore().serverLine(), "#888888");
+            LeanCoreConfig config = plugin.config();
+            long nowMs = System.currentTimeMillis();
+            say(ctx, String.format(Locale.ROOT,
+                    "flags govern=%s learning=%s embeddedStd=%s unload=%s",
+                    config.governEnabled,
+                    config.learningEnabled,
+                    config.embeddedStandardProfile,
+                    config.unloadEnabled), "#888888");
+            say(ctx, UnloadProbeGate.statusLine(config, nowMs), "#888888");
         }
     }
 
@@ -240,6 +250,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             if (rt == null) {
                 return;
             }
+            LeanCorePlugin plugin = plugin(ctx);
             say(ctx, rt.learningStore().statusLine(), "#FFAA00");
             say(ctx, rt.learningStore().mlStatusLine(), "#FFAA00");
             say(ctx, rt.learningStore().unloadOutcomeTracker().statusLine(), "#AAAAAA");
@@ -247,6 +258,9 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             say(ctx, rt.learningStore().serverLine(), "#888888");
             say(ctx, rt.learningStore().policyBandit().topArmLine(), "#AAAAAA");
             say(ctx, rt.learningStore().holdoutStatusLine(), "#AAAAAA");
+            if (plugin != null) {
+                say(ctx, UnloadProbeGate.statusLine(plugin.config(), System.currentTimeMillis()), "#888888");
+            }
             say(ctx, rt.regionalPressureCache().statusLine(), "#888888");
             say(ctx, "holdout=10% skips view-radius cuts; bandit learns from treatment cohort only", "#888888");
         }
@@ -543,18 +557,29 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
             MemoryRuntime rt = runtime(ctx);
-            if (rt == null) {
+            LeanCorePlugin plugin = plugin(ctx);
+            if (rt == null || plugin == null) {
                 return;
             }
-            for (String line : ApiProbe.run(
+            var lines = ApiProbe.run(
                     store,
                     ref,
                     playerRef,
                     world,
                     rt.dormancyMap(),
                     rt.zoneChunkUnloader(),
-                    rt.lastSample().tier())) {
+                    rt.lastSample().tier());
+            boolean passed = ApiProbe.passed(lines);
+            for (String line : lines) {
                 say(ctx, line, "#AAAAAA");
+            }
+            if (passed) {
+                LeanCoreConfig config = plugin.config();
+                config.probePassedAtMs = System.currentTimeMillis();
+                config.save();
+                say(ctx, "probe PASSED — unload gate open (saved to LeanCore.json)", "#55FF55");
+            } else {
+                say(ctx, "probe FAILED — fix failing steps before enabling unload", "#FF8888");
             }
         }
     }

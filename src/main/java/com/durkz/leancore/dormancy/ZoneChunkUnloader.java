@@ -1,6 +1,8 @@
 package com.durkz.leancore.dormancy;
 
+import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.probe.UnloadProbeGate;
 import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.runtime.WorldDispatch;
 import com.durkz.leancore.intelligence.UnloadOutcomeTracker;
@@ -29,6 +31,7 @@ public class ZoneChunkUnloader {
     private volatile int lastUnloadedChunks;
     private volatile int lastCandidateZones;
     private long lastSweepMs;
+    private long lastProbeGateLogMs;
 
     public ZoneChunkUnloader(LeanCoreConfig config, UnloadOutcomeTracker unloadOutcomeTracker) {
         this.config = config;
@@ -40,6 +43,18 @@ public class ZoneChunkUnloader {
             return 0;
         }
         long nowMs = System.currentTimeMillis();
+        if (UnloadProbeGate.blocksUnload(config)) {
+            if (nowMs - lastProbeGateLogMs >= 60_000L) {
+                lastProbeGateLogMs = nowMs;
+                LeanCorePlugin plugin = LeanCorePlugin.getInstance();
+                if (plugin != null) {
+                    plugin.getLogger().atWarning().log(
+                            "unload gated — run /leancore probe before unload sweeps"
+                    );
+                }
+            }
+            return 0;
+        }
         long minIntervalMs = Math.max(1, config.unloadMinIntervalSeconds) * 1000L;
         if (lastSweepMs > 0L && nowMs - lastSweepMs < minIntervalMs) {
             return 0;
