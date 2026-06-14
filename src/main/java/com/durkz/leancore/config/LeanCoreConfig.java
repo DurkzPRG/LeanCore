@@ -94,6 +94,26 @@ public class LeanCoreConfig {
     public boolean gcHintEnabled = false;
     public int gcHintMinIntervalSeconds = 600;
 
+    // --- LITE solo governor (1.5.0); STANDARD/FULL ignore these ---
+    /** Master switch for LITE memory actions (view, unload, demote). */
+    public boolean liteMemoryGovernorEnabled = true;
+    /** Learning persistence and demand features on LITE profile. */
+    public boolean liteLearningEnabled = true;
+    /** Adaptive view-radius on embedded solo. */
+    public boolean liteViewRadiusEnabled = true;
+    /** Chunk saturation (loaded/budget) above this triggers COMFORT cap scale. */
+    public double liteViewPressureThreshold = 0.85D;
+    /** COMFORT view scale when chunk pressure is high. */
+    public double liteViewComfortCapScale = 0.97D;
+    public double liteViewWatchScale = 0.94D;
+    public double liteViewTightScale = 0.88D;
+    public double liteViewCriticalScale = 0.76D;
+    public int liteMinClientViewRadius = 8;
+    public int liteViewRadiusLoginGraceSeconds = 600;
+    public boolean liteUnloadEnabled = true;
+    public int liteUnloadIdleSeconds = 180;
+    public int liteUnloadMaxChunksPerSweep = 8;
+
     public static LeanCoreConfig load(Path dataDirectory) {
         File directory = dataDirectory.toFile();
         if (!directory.exists()) {
@@ -190,6 +210,7 @@ public class LeanCoreConfig {
         if (gcHintMinIntervalSeconds <= 0) {
             gcHintMinIntervalSeconds = 600;
         }
+        sanitizeLiteSettings();
         if (learningMaxPersistedPlayers < 0) {
             learningMaxPersistedPlayers = 512;
         }
@@ -202,6 +223,50 @@ public class LeanCoreConfig {
         if (hudAdminGroups == null || hudAdminGroups.length == 0) {
             hudAdminGroups = new String[]{"OP", "Admin"};
         }
+    }
+
+    /** Package-visible for unit tests. */
+    void normalizeDefaults() {
+        applyRuntimeDefaults();
+    }
+
+    private void sanitizeLiteSettings() {
+        liteViewPressureThreshold = clampRatio(liteViewPressureThreshold, 0.85D);
+        liteViewComfortCapScale = clampScale(liteViewComfortCapScale, 0.97D);
+        liteViewWatchScale = clampScale(liteViewWatchScale, 0.94D);
+        liteViewTightScale = clampScale(liteViewTightScale, 0.88D);
+        liteViewCriticalScale = clampScale(liteViewCriticalScale, 0.76D);
+        if (liteMinClientViewRadius <= 0) {
+            liteMinClientViewRadius = 8;
+        }
+        liteMinClientViewRadius = Math.max(minClientViewRadius, liteMinClientViewRadius);
+        liteMinClientViewRadius = Math.min(maxClientViewRadius, liteMinClientViewRadius);
+        if (liteViewRadiusLoginGraceSeconds < 0) {
+            liteViewRadiusLoginGraceSeconds = 600;
+        }
+        if (liteUnloadIdleSeconds < 60) {
+            liteUnloadIdleSeconds = 180;
+        }
+        if (liteUnloadMaxChunksPerSweep <= 0) {
+            liteUnloadMaxChunksPerSweep = 8;
+        }
+        if (liteUnloadMaxChunksPerSweep > 64) {
+            liteUnloadMaxChunksPerSweep = 64;
+        }
+    }
+
+    private static double clampRatio(double value, double fallback) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return fallback;
+        }
+        return Math.max(0.50D, Math.min(1.0D, value));
+    }
+
+    private static double clampScale(double value, double fallback) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return fallback;
+        }
+        return Math.max(0.50D, Math.min(1.0D, value));
     }
 
     public void save() {
