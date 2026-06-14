@@ -66,6 +66,7 @@ public class MemoryRuntime {
     private double lastLiteX;
     private double lastLiteZ;
     private boolean lastLitePositioned;
+    private long lastDeferredGovernorLogMs;
 
     public MemoryRuntime(
             LeanCorePlugin plugin,
@@ -301,7 +302,13 @@ public class MemoryRuntime {
         final RuntimeProfile governorProfile = profile;
         World world = resolvePrimaryWorld(online);
         if (world == null) {
-            tickGovernor(governorProfile, online, nowMs);
+            if (nowMs - lastDeferredGovernorLogMs >= 60_000L) {
+                lastDeferredGovernorLogMs = nowMs;
+                plugin.getLogger().atFine().log(
+                        "Governor world-thread work deferred (no alive world)"
+                );
+            }
+            tickGovernorDeferred(governorProfile, online, nowMs);
             return;
         }
 
@@ -323,6 +330,24 @@ public class MemoryRuntime {
         } catch (RuntimeException e) {
             governorWorldTickPending.set(false);
             plugin.getLogger().atFine().withCause(e).log("governor tick not queued — world shutting down");
+        }
+    }
+
+    private void tickGovernorDeferred(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs) {
+        MemorySnapshot sample = sensor.sample();
+        lastSample = sample;
+        lastMode = sessionDetector.detect(sample.onlinePlayers());
+        learningStore.holdoutCohort().noteOnline(online, sample.heapUsedRatio(), nowMs);
+
+        if (profile.tracksPlayerMotion()) {
+            classifier.samplePositionsLite(online, nowMs);
+        }
+
+        var demands = classifier.snapshotDemands(nowMs);
+        if (profile.runsLearning(config)) {
+            learningStore.noteHeap(sample.heapUsedRatio());
+            learningStore.noteTier(sample.tier());
+            learningStore.noteDemands(demands);
         }
     }
 
