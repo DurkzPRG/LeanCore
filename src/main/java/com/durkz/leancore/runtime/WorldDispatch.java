@@ -43,7 +43,7 @@ public final class WorldDispatch {
         }
     }
 
-    private static boolean shouldRunInline(World world) {
+    static boolean shouldRunInline(World world) {
         return GovernorWorldContext.isActive() || world.isInThread();
     }
 }

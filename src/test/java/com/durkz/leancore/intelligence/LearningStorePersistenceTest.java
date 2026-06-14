@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,6 +51,7 @@ class LearningStorePersistenceTest {
         assertEquals(PlayerBehavior.MINER, reloaded.demandFor(playerId).debugLabel());
         assertTrue(reloaded.policyBandit().armCount() >= 1);
         assertTrue(reloaded.statusLine().contains("learning=v7"));
+        assertTrue(reloaded.statusLine().contains("flushErr=0"));
     }
 
     @Test
@@ -99,6 +101,54 @@ class LearningStorePersistenceTest {
         store.flush(true, java.util.Set.of());
         assertTrue(store.statusLine().contains("players=2"));
         assertTrue(store.statusLine().contains("pruned=3"));
+    }
+
+    @Test
+    void flushFailureSurfacesInStatusLine() throws Exception {
+        LeanCoreConfig config = configWithLearning();
+        Files.createDirectories(dataDir.resolve(LearningStateCodec.GZ_FILE + ".tmp"));
+        LearningStore store = new LearningStore(dataDir, config, (message, cause) -> { });
+        store.markDirty();
+        store.flush(true, java.util.Set.of());
+
+        assertTrue(store.statusLine().contains("flushErr=1"));
+        assertTrue(store.statusLine().contains("lastFlush=never"));
+    }
+
+    @Test
+    void successfulFlushRecordsLastFlushAge() throws Exception {
+        LeanCoreConfig config = configWithLearning();
+        LearningStore store = new LearningStore(dataDir, config);
+        UUID playerId = UUID.randomUUID();
+        store.savePlayerFeatures(new PlayerFeatureState(playerId));
+        store.flush(true, java.util.Set.of(playerId));
+
+        String status = store.statusLine();
+        assertTrue(status.contains("flushErr=0"));
+        assertTrue(status.contains("flushes=1"));
+        assertTrue(status.matches("(?s).*lastFlush=\\d+s ago.*"));
+    }
+
+    @Test
+    void corruptV7FallsBackWithoutCrashing() throws Exception {
+        LeanCoreConfig config = configWithLearning();
+        UUID playerId = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+
+        Properties props = new Properties();
+        props.setProperty("schema", "6");
+        props.setProperty("player." + playerId + ".demand", "0.7");
+        props.setProperty("player." + playerId + ".label", "MINER");
+        Path legacy = dataDir.resolve("learning.state");
+        try (var out = Files.newOutputStream(legacy)) {
+            props.store(out, "legacy");
+        }
+        Files.writeString(dataDir.resolve(LearningStateCodec.GZ_FILE), "not a gzip snapshot");
+
+        AtomicInteger warnings = new AtomicInteger();
+        LearningStore store = new LearningStore(dataDir, config, (message, cause) -> warnings.incrementAndGet());
+
+        assertEquals(PlayerBehavior.MINER, store.demandFor(playerId).debugLabel());
+        assertEquals(1, warnings.get());
     }
 
     private static LeanCoreConfig configWithLearning() {

@@ -49,6 +49,7 @@ javadoc {
 
 dependencies {
     compileOnly(files("${hytaleHome}/install/${patchline}/package/game/latest/Server/HytaleServer.jar"))
+    testImplementation(files("${hytaleHome}/install/${patchline}/package/game/latest/Server/HytaleServer.jar"))
 
     if (file('libs').exists()) {
         fileTree(dir: 'libs', include: ['*.jar']).each { jarFile ->

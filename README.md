@@ -101,6 +101,12 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 
 Output: `build/libs/LeanCore-1.4.0.jar`
 
+**Local deploy (DurkzPRG):** copy the built JAR to:
+
+`%AppData%\Hytale\UserData\Mods\`
+
+Example (Windows): `Copy-Item build\libs\LeanCore-1.4.0.jar $env:APPDATA\Hytale\UserData\Mods\`
+
 ## Links
 
 - [Mod page](https://durkzprgmods.pages.dev/mods/leancore)
