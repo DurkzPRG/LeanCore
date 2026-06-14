@@ -27,6 +27,7 @@ class SavingsReportTest {
                 config,
                 RuntimeProfile.FULL,
                 new UnloadOutcomeTracker(),
+                new GcHintScheduler(config),
                 0L,
                 now + 2000L
         ));
@@ -70,6 +71,7 @@ class SavingsReportTest {
                 config,
                 RuntimeProfile.FULL,
                 new UnloadOutcomeTracker(),
+                new GcHintScheduler(config),
                 0L,
                 now + 5000L
         ));
@@ -77,6 +79,86 @@ class SavingsReportTest {
         assertTrue(output.contains("governor ON"));
         assertTrue(output.contains("while governor was active"));
         assertTrue(output.contains("JVM heap only"));
+    }
+
+    @Test
+    void reportsGcHintDisabledByDefault() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        SessionSavingsTracker session = new SessionSavingsTracker();
+        long now = System.currentTimeMillis();
+        session.noteHeapSample(mb(2000), mb(4000), now);
+
+        MemorySnapshot current = new MemorySnapshot(mb(1800), mb(4000), 0.45D, 1, 0.0D, MemoryTier.COMFORT);
+        String output = join(SavingsReport.format(
+                current,
+                session,
+                GovernorStatus.idle(),
+                config,
+                RuntimeProfile.LITE,
+                new UnloadOutcomeTracker(),
+                new GcHintScheduler(config),
+                0L,
+                now + 1000L
+        ));
+
+        assertTrue(output.contains("GC hint"));
+        assertTrue(output.contains("gcHintEnabled=false"));
+    }
+
+    @Test
+    void reportsGcHintCountsOnLite() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.gcHintEnabled = true;
+        config.soloIdleThresholdSeconds = 60;
+        GcHintScheduler scheduler = new GcHintScheduler(config);
+        scheduler.maybeHint(0L, 120L, MemoryTier.COMFORT, RuntimeProfile.LITE);
+
+        SessionSavingsTracker session = new SessionSavingsTracker();
+        long now = 601_000L;
+        session.noteHeapSample(mb(2000), mb(4000), now);
+
+        MemorySnapshot current = new MemorySnapshot(mb(1800), mb(4000), 0.45D, 1, 0.0D, MemoryTier.COMFORT);
+        String output = join(SavingsReport.format(
+                current,
+                session,
+                GovernorStatus.idle(),
+                config,
+                RuntimeProfile.LITE,
+                new UnloadOutcomeTracker(),
+                scheduler,
+                0L,
+                now
+        ));
+
+        assertTrue(output.contains("gcHintEnabled=true"));
+        assertTrue(output.contains("hints=1"));
+        assertTrue(output.contains("idle>=60s"));
+    }
+
+    @Test
+    void warnsGcHintOnNonLiteProfile() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.gcHintEnabled = true;
+
+        SessionSavingsTracker session = new SessionSavingsTracker();
+        long now = System.currentTimeMillis();
+        session.noteHeapSample(mb(2000), mb(4000), now);
+
+        MemorySnapshot current = new MemorySnapshot(mb(1800), mb(4000), 0.45D, 1, 0.0D, MemoryTier.COMFORT);
+        String output = join(SavingsReport.format(
+                current,
+                session,
+                GovernorStatus.idle(),
+                config,
+                RuntimeProfile.STANDARD,
+                new UnloadOutcomeTracker(),
+                new GcHintScheduler(config),
+                0L,
+                now + 1000L
+        ));
+
+        assertTrue(output.contains("hints only on LITE"));
+        assertTrue(output.contains("profile STANDARD"));
     }
 
     private static String join(java.util.List<SavingsReport.Line> lines) {

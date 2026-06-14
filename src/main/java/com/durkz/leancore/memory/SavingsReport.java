@@ -23,6 +23,7 @@ public final class SavingsReport {
             LeanCoreConfig config,
             RuntimeProfile profile,
             UnloadOutcomeTracker unloadTracker,
+            GcHintScheduler gcHint,
             long viewRadiusGraceUntilMs,
             long nowMs
     ) {
@@ -139,6 +140,9 @@ public final class SavingsReport {
             lines.add(new Line("unload=OFF — policy unload count may not reduce heap if engine already evicted", "#888888"));
         }
 
+        lines.add(new Line("--- GC hint (LITE solo, experimental) ---", "#888888"));
+        lines.add(gcHintLine(config, profile, gcHint, nowMs));
+
         lines.add(new Line("--- Notes ---", "#888888"));
         lines.add(new Line("JVM heap only — not OS/VPS RSS. GC can shift numbers.", "#888888"));
 
@@ -165,6 +169,27 @@ public final class SavingsReport {
         }
 
         return lines;
+    }
+
+    private static Line gcHintLine(LeanCoreConfig config, RuntimeProfile profile, GcHintScheduler gcHint, long nowMs) {
+        if (config == null || !config.gcHintEnabled) {
+            return new Line("gcHintEnabled=false (opt-in LITE idle nudge)", "#888888");
+        }
+        int hints = gcHint != null ? gcHint.hintCount() : 0;
+        long lastMs = gcHint != null ? gcHint.lastHintMs() : -1L;
+        String last = lastMs >= 0L ? formatDuration(nowMs - lastMs) + " ago" : "never";
+        if (profile != RuntimeProfile.LITE) {
+            return new Line(String.format(Locale.ROOT,
+                    "gcHintEnabled=true | profile %s (hints only on LITE) | hints=%d | last=%s",
+                    profile,
+                    hints,
+                    last), "#FFAA00");
+        }
+        return new Line(String.format(Locale.ROOT,
+                "gcHintEnabled=true | hints=%d | last=%s | needs COMFORT + idle>=%ds",
+                hints,
+                last,
+                Math.max(60, config.soloIdleThresholdSeconds)), "#AAAAAA");
     }
 
     private static Line formatHeapLine(String label, long used, long max, double ratio, String color, String suffix) {
