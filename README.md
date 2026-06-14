@@ -35,13 +35,13 @@ Does not touch client FPS or GPU. Primary metric is **server JVM heap**.
 
 Default: `localHostMode: "AUTO"`. Use `"PASSIVE"` to disable background ticks. Set `dedicatedServerMode: true` on a dedicated host.
 
-Boot log: `LeanCore 1.4.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
+Boot log: `LeanCore 1.4.1 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
 
 View-radius cuts never apply on embedded solo (1 player) unless `dedicatedServerMode: true`.
 
 ## Install
 
-1. Download **LeanCore-1.4.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+1. Download **LeanCore-1.4.1.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Put the JAR in your world's `mods/` folder
 3. Config: `mods/durkz_LeanCore/data/LeanCore.json`
 4. Run `/leancore status` after about a minute
@@ -99,13 +99,13 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 ./gradlew build
 ```
 
-Output: `build/libs/LeanCore-1.4.0.jar`
+Output: `build/libs/LeanCore-1.4.1.jar`
 
 **Local deploy (DurkzPRG):** copy the built JAR to:
 
 `%AppData%\Hytale\UserData\Mods\`
 
-Example (Windows): `Copy-Item build\libs\LeanCore-1.4.0.jar $env:APPDATA\Hytale\UserData\Mods\`
+Example (Windows): `Copy-Item build\libs\LeanCore-1.4.1.jar $env:APPDATA\Hytale\UserData\Mods\`
 
 ## Links
 
