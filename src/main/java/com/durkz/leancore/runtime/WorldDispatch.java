@@ -44,6 +44,9 @@ public final class WorldDispatch {
     }
 
     static boolean shouldRunInline(World world) {
-        return GovernorWorldContext.isActive() || world.isInThread();
+        if (world != null && world.isInThread()) {
+            return true;
+        }
+        return GovernorWorldContext.matchesWorld(world);
     }
 }

@@ -1,26 +1,40 @@
 package com.durkz.leancore.runtime;
 
+import com.hypixel.hytale.server.core.universe.world.World;
+
+import java.util.UUID;
+
 /**
- * Marks the current thread as executing {@code MemoryRuntime.tickGovernor} on a world thread.
- * Nested {@code world.execute} calls from this context are replaced with inline runs so tasks
- * cannot outlive shutdown.
+ * Marks governor work tied to a specific world on the current thread.
+ * Nested {@code WorldDispatch.run} may inline only for that world.
  */
 public final class GovernorWorldContext {
 
-    private static final ThreadLocal<Boolean> ACTIVE = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<UUID> ACTIVE_WORLD = new ThreadLocal<>();
 
     private GovernorWorldContext() {
     }
 
-    public static void enter() {
-        ACTIVE.set(true);
+    public static void enter(UUID worldUuid) {
+        ACTIVE_WORLD.set(worldUuid);
     }
 
     public static void exit() {
-        ACTIVE.remove();
+        ACTIVE_WORLD.remove();
     }
 
     public static boolean isActive() {
-        return ACTIVE.get();
+        return ACTIVE_WORLD.get() != null;
+    }
+
+    public static boolean matchesWorld(World world) {
+        if (world == null) {
+            return false;
+        }
+        UUID active = ACTIVE_WORLD.get();
+        if (active == null) {
+            return false;
+        }
+        return active.equals(world.getWorldConfig().getUuid());
     }
 }

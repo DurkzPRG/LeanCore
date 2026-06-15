@@ -28,6 +28,7 @@ import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 
 import java.util.Collection;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -321,10 +322,11 @@ public class MemoryRuntime {
             return;
         }
         try {
+            UUID worldUuid = world.getWorldConfig().getUuid();
             world.execute(() -> {
                 try {
                     if (running) {
-                        tickGovernor(governorProfile, online, nowMs);
+                        tickGovernor(governorProfile, online, nowMs, worldUuid);
                     }
                 } catch (Exception e) {
                     plugin.getLogger().atWarning().withCause(e).log("governor tick failed");
@@ -356,8 +358,8 @@ public class MemoryRuntime {
         }
     }
 
-    private void tickGovernor(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs) {
-        GovernorWorldContext.enter();
+    private void tickGovernor(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs, UUID worldUuid) {
+        GovernorWorldContext.enter(worldUuid);
         try {
             tickGovernorOnWorld(profile, online, nowMs);
         } finally {
@@ -438,41 +440,6 @@ public class MemoryRuntime {
     }
 
     private void tickLite(java.util.Collection<PlayerRef> online, long nowMs) {
-        if (!online.isEmpty()) {
-            classifier.samplePositionsLite(online, nowMs);
-        }
-        if (SoloRuntimePolicy.shouldRefreshDormancy(
-                config,
-                lastLiteX,
-                lastLiteZ,
-                lastLitePositioned,
-                nowMs,
-                lastDormancyRefreshMs
-        )) {
-            dormancyMap.refreshFromPlayers();
-            lastDormancyRefreshMs = nowMs;
-            SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
-            lastLiteX = motion.x();
-            lastLiteZ = motion.z();
-            lastLitePositioned = motion.positioned();
-        }
-
-        if (SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {
-            MemorySnapshot sample = sensor.sample(false);
-            lastSample = sample;
-            lastLiteHeapSampleMs = nowMs;
-            lastMode = sessionDetector.detect(sample.onlinePlayers());
-            if (gcHintScheduler.maybeHint(nowMs, soloPlayerIdleSec(), sample.tier(), RuntimeProfile.LITE)) {
-                plugin.getLogger().atFine().log("GC hint issued (LITE idle, tier COMFORT)");
-            }
-            queueLiteGovernorTick(online, nowMs);
-        }
-    }
-
-    private void queueLiteGovernorTick(Collection<PlayerRef> online, long nowMs) {
-        if (!activeProfile.runsLiteGovernor(config)) {
-            return;
-        }
         World world = resolvePrimaryWorld(online);
         if (world == null) {
             return;
@@ -481,30 +448,61 @@ public class MemoryRuntime {
             return;
         }
         try {
+            UUID worldUuid = world.getWorldConfig().getUuid();
             world.execute(() -> {
                 try {
                     if (running) {
-                        tickLiteGovernorOnWorld(nowMs);
+                        tickLiteOnWorld(online, nowMs, worldUuid);
                     }
                 } catch (Exception e) {
-                    plugin.getLogger().atWarning().withCause(e).log("lite governor tick failed");
+                    plugin.getLogger().atWarning().withCause(e).log("lite tick failed");
                 } finally {
                     governorWorldTickPending.set(false);
                 }
             });
         } catch (RuntimeException e) {
             governorWorldTickPending.set(false);
-            plugin.getLogger().atFine().withCause(e).log("lite governor tick not queued — world shutting down");
+            plugin.getLogger().atFine().withCause(e).log("lite tick not queued — world shutting down");
         }
     }
 
-    private void tickLiteGovernorOnWorld(long nowMs) {
-        GovernorWorldContext.enter();
+    private void tickLiteOnWorld(Collection<PlayerRef> online, long nowMs, UUID worldUuid) {
+        GovernorWorldContext.enter(worldUuid);
         try {
-            MemorySnapshot sample = lastSample;
-            if (sample == null) {
+            if (!online.isEmpty()) {
+                classifier.samplePositionsLite(online, nowMs);
+            }
+            if (SoloRuntimePolicy.shouldRefreshDormancy(
+                    config,
+                    lastLiteX,
+                    lastLiteZ,
+                    lastLitePositioned,
+                    nowMs,
+                    lastDormancyRefreshMs
+            )) {
+                dormancyMap.refreshFromPlayers();
+                lastDormancyRefreshMs = nowMs;
+                SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
+                lastLiteX = motion.x();
+                lastLiteZ = motion.z();
+                lastLitePositioned = motion.positioned();
+            }
+
+            if (!SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {
                 return;
             }
+
+            MemorySnapshot sample = sensor.sample(false);
+            lastSample = sample;
+            lastLiteHeapSampleMs = nowMs;
+            lastMode = sessionDetector.detect(sample.onlinePlayers());
+            if (gcHintScheduler.maybeHint(nowMs, soloPlayerIdleSec(), sample.tier(), RuntimeProfile.LITE)) {
+                plugin.getLogger().atFine().log("GC hint issued (LITE idle, tier COMFORT)");
+            }
+            if (!activeProfile.runsLiteGovernor(config)) {
+                return;
+            }
+
             var demands = classifier.snapshotDemands(nowMs);
             if (activeProfile.runsLiteLearning(config)) {
                 learningStore.noteHeap(sample.heapUsedRatio());

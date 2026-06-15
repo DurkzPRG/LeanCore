@@ -3,6 +3,7 @@ package com.durkz.leancore.runtime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -23,10 +24,10 @@ class WorldDispatchTest {
     }
 
     @Test
-    void governorContextPrefersInlineDispatch() {
-        GovernorWorldContext.enter();
+    void governorContextDoesNotInlineWithoutMatchingWorld() {
+        GovernorWorldContext.enter(UUID.randomUUID());
         try {
-            assertTrue(WorldDispatch.shouldRunInline(null));
+            assertFalse(WorldDispatch.shouldRunInline(null));
         } finally {
             GovernorWorldContext.exit();
         }
