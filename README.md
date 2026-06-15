@@ -2,7 +2,7 @@
 
 Server-side memory governor for Hytale. Cools idle map regions, trims load under heap pressure, and learns retention weights from how players actually play.
 
-On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK chunk reclaim, and on-by-default learning — without the weight of STANDARD/FULL. When friends join the runtime scales to **STANDARD**; dedicated hosts use **FULL**.
+On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK chunk reclaim, and on-by-default learning, without the weight of STANDARD/FULL. When friends join the runtime scales to **STANDARD**; dedicated hosts use **FULL**.
 
 [![CurseForge](https://img.shields.io/badge/CurseForge-LeanCore-orange)](https://www.curseforge.com/hytale/mods/leancore)
 [![Documentation](https://img.shields.io/badge/Docs-DurkzPRG%20Mods-blue)](https://durkzprgmods.pages.dev/documentation/leancore)
@@ -20,8 +20,6 @@ On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK ch
 - Activity Sense (1.2+): online classifier for mining, chopping, farming, building, crafting, combat
 - Runtime profiles: `LITE` (solo), `STANDARD` (friends), `FULL` (dedicated)
 - Staff tools: `/leancore` commands, heatmap, optional HUD
-
-Does not touch client FPS or GPU. Primary metric is **server JVM heap**. Chunk load follows server view distance ([HytaleModding](https://hytalemodding.dev/en/docs/)); LeanCore acts through `setClientViewRadius` and `ChunkStore.remove(UNLOAD)`.
 
 ## Runtime profiles
 
@@ -140,4 +138,4 @@ Example (Windows): `Copy-Item build\libs\LeanCore-1.5.0.jar $env:APPDATA\Hytale\
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
