@@ -169,7 +169,15 @@ public final class SavingsReport {
                 "chunks unloaded (policy): %d  |  chunks evicted (engine): %d",
                 policyUnloads,
                 engineUnloads), "#AAAAAA"));
-        if (!config.unloadEnabled) {
+        if (liteProfile) {
+            if (config.liteUnloadEnabled) {
+                lines.add(new Line(
+                        "liteUnload=ON — AFK reclaim via lite path (no governEnabled); engine may evict first",
+                        "#888888"));
+            } else {
+                lines.add(new Line("liteUnload=OFF (liteUnloadEnabled=false)", "#888888"));
+            }
+        } else if (!config.unloadEnabled) {
             lines.add(new Line("unload=OFF — policy unload count may not reduce heap if engine already evicted", "#888888"));
         }
 

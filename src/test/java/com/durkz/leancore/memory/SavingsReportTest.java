@@ -5,6 +5,7 @@ import com.durkz.leancore.intelligence.UnloadOutcomeTracker;
 import com.durkz.leancore.runtime.RuntimeProfile;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SavingsReportTest {
@@ -178,6 +179,33 @@ class SavingsReportTest {
         ));
 
         assertTrue(output.contains("liteUnload=true"));
+    }
+
+    @Test
+    void reportsLiteUnloadOnMessageWhenEnabled() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.liteUnloadEnabled = true;
+        config.unloadEnabled = false;
+        SessionSavingsTracker session = new SessionSavingsTracker();
+        long now = System.currentTimeMillis();
+        session.noteHeapSample(mb(2000), mb(4000), now);
+
+        MemorySnapshot current = new MemorySnapshot(mb(1800), mb(4000), 0.45D, 1, 0.0D, MemoryTier.COMFORT);
+        String output = join(SavingsReport.format(
+                current,
+                session,
+                GovernorStatus.idle(),
+                config,
+                RuntimeProfile.LITE,
+                new UnloadOutcomeTracker(),
+                new GcHintScheduler(config),
+                0L,
+                0L,
+                now + 1000L
+        ));
+
+        assertTrue(output.contains("liteUnload=ON"));
+        assertFalse(output.contains("unload=OFF"));
     }
 
     @Test
