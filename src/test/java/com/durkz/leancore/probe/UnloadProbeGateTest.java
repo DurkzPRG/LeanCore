@@ -39,6 +39,7 @@ class UnloadProbeGateTest {
     void inactiveWhenUnloadDisabled() {
         LeanCoreConfig config = new LeanCoreConfig();
         config.unloadEnabled = false;
+        config.liteUnloadEnabled = false;
         config.unloadProbeGateEnabled = true;
         assertFalse(UnloadProbeGate.blocksUnload(config));
         assertTrue(UnloadProbeGate.statusLine(config, 0L).contains("n/a"));
@@ -55,5 +56,26 @@ class UnloadProbeGateTest {
         long now = 90_000L;
         config.probePassedAtMs = 30_000L;
         assertTrue(UnloadProbeGate.statusLine(config, now).contains("open"));
+    }
+
+    @Test
+    void blocksLiteUnloadWhenProbeNotPassed() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.liteUnloadEnabled = true;
+        config.unloadEnabled = false;
+        config.unloadProbeGateEnabled = true;
+        config.probePassedAtMs = 0L;
+        assertTrue(UnloadProbeGate.blocksLiteUnload(config));
+        assertFalse(UnloadProbeGate.blocksUnload(config));
+    }
+
+    @Test
+    void liteStatusLineWhenStandardUnloadDisabled() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.unloadEnabled = false;
+        config.liteUnloadEnabled = true;
+        config.unloadProbeGateEnabled = true;
+        config.probePassedAtMs = 0L;
+        assertTrue(UnloadProbeGate.statusLine(config, 0L).contains("lite unload gate=blocked"));
     }
 }

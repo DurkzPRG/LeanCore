@@ -99,6 +99,73 @@ public class ZoneChunkUnloader {
         return unloaded;
     }
 
+    public int sweepLite(ZoneDormancyMap dormancyMap, MemoryTier tier, long playerIdleSec) {
+        if (!config.enabled || !config.liteUnloadEnabled) {
+            return 0;
+        }
+        if (playerIdleSec < Math.max(60, config.liteUnloadIdleSeconds)) {
+            return 0;
+        }
+        long nowMs = System.currentTimeMillis();
+        if (UnloadProbeGate.blocksLiteUnload(config)) {
+            if (nowMs - lastProbeGateLogMs >= 60_000L) {
+                lastProbeGateLogMs = nowMs;
+                LeanCorePlugin plugin = LeanCorePlugin.getInstance();
+                if (plugin != null) {
+                    plugin.getLogger().atWarning().log(
+                            "lite unload gated — run /leancore probe before unload sweeps"
+                    );
+                }
+            }
+            return 0;
+        }
+        if (!RuntimeGuard.active()) {
+            return 0;
+        }
+        long minIntervalMs = Math.max(1, config.unloadMinIntervalSeconds) * 1000L;
+        if (lastSweepMs > 0L && nowMs - lastSweepMs < minIntervalMs) {
+            return 0;
+        }
+
+        List<ZoneKey> candidates = dormancyMap.unloadCandidateZones(tier, MemoryTier.WATCH);
+        if (candidates.isEmpty()) {
+            lastCandidateZones = 0;
+            return 0;
+        }
+
+        Map<UUID, List<ZoneKey>> byWorld = new HashMap<>();
+        for (ZoneKey zone : candidates) {
+            byWorld.computeIfAbsent(zone.worldUuid(), ignored -> new ArrayList<>()).add(zone);
+        }
+
+        int maxChunks = Math.max(1, config.liteUnloadMaxChunksPerSweep);
+        List<ChunkTracker> trackers = collectTrackers();
+        int unloaded = 0;
+
+        for (Map.Entry<UUID, List<ZoneKey>> entry : byWorld.entrySet()) {
+            if (!RuntimeGuard.active()) {
+                break;
+            }
+            World world = Universe.get().getWorld(entry.getKey());
+            if (world == null || !world.isAlive()) {
+                continue;
+            }
+            List<ZoneKey> zones = List.copyOf(entry.getValue());
+            int[] counter = new int[1];
+            WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
+            unloaded += counter[0];
+        }
+
+        lastSweepMs = nowMs;
+        lastCandidateZones = candidates.size();
+        lastUnloadedChunks = unloaded;
+        if (unloadOutcomeTracker != null) {
+            unloadOutcomeTracker.beginSweepWindow();
+            unloadOutcomeTracker.notePolicyUnload(unloaded);
+        }
+        return unloaded;
+    }
+
     public int lastUnloadedChunks() {
         return lastUnloadedChunks;
     }

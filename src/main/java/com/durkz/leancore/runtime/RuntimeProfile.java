@@ -34,6 +34,10 @@ public enum RuntimeProfile {
         return this == LITE && config.liteMemoryGovernorEnabled;
     }
 
+    public boolean runsLiteUnload(LeanCoreConfig config) {
+        return this == LITE && config.liteUnloadEnabled;
+    }
+
     public boolean runsLearning(LeanCoreConfig config) {
         return switch (this) {
             case LITE -> false;

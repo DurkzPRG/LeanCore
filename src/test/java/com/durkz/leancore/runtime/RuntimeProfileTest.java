@@ -38,6 +38,16 @@ class RuntimeProfileTest {
     }
 
     @Test
+    void liteRunsLiteUnloadWhenEnabled() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.liteUnloadEnabled = true;
+        assertTrue(RuntimeProfile.LITE.runsLiteUnload(config));
+        config.liteUnloadEnabled = false;
+        assertFalse(RuntimeProfile.LITE.runsLiteUnload(config));
+        assertFalse(RuntimeProfile.STANDARD.runsLiteUnload(config));
+    }
+
+    @Test
     void standardHonorsConfigFlags() {
         LeanCoreConfig config = new LeanCoreConfig();
         config.governEnabled = true;

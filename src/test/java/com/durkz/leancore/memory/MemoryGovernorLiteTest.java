@@ -27,6 +27,7 @@ class MemoryGovernorLiteTest {
                 new ZoneDormancyMap(config),
                 0.0D,
                 System.currentTimeMillis(),
+                0L,
                 System.currentTimeMillis()
         );
 

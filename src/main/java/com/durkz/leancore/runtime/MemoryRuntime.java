@@ -513,6 +513,7 @@ public class MemoryRuntime {
                     dormancyMap,
                     chunkSaturation,
                     liteSessionStartedMs,
+                    soloPlayerIdleSec(),
                     nowMs
             );
             GovernorStatus govStatus = governor.status();

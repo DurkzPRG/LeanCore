@@ -19,7 +19,23 @@ public final class UnloadProbeGate {
         return config.probePassedAtMs <= 0L;
     }
 
+    public static boolean blocksLiteUnload(LeanCoreConfig config) {
+        if (config == null || !config.liteUnloadEnabled) {
+            return false;
+        }
+        if (!config.unloadProbeGateEnabled) {
+            return false;
+        }
+        return config.probePassedAtMs <= 0L;
+    }
+
     public static String statusLine(LeanCoreConfig config, long nowMs) {
+        if (config == null) {
+            return "unload gate=n/a";
+        }
+        if (!config.unloadEnabled && config.liteUnloadEnabled) {
+            return liteStatusLine(config, nowMs);
+        }
         if (config == null || !config.unloadEnabled) {
             return "unload gate=n/a (unloadEnabled=false)";
         }
@@ -38,5 +54,23 @@ public final class UnloadProbeGate {
             return String.format(Locale.ROOT, "unload gate=open probePassed=%dh ago", ageHours);
         }
         return String.format(Locale.ROOT, "unload gate=open probePassed=%dd ago", ageHours / 24L);
+    }
+
+    private static String liteStatusLine(LeanCoreConfig config, long nowMs) {
+        if (!config.unloadProbeGateEnabled) {
+            return "lite unload gate=override (unloadProbeGateEnabled=false)";
+        }
+        if (config.probePassedAtMs <= 0L) {
+            return "lite unload gate=blocked (run /leancore probe)";
+        }
+        long ageMin = Math.max(0L, (nowMs - config.probePassedAtMs) / 60_000L);
+        if (ageMin < 120L) {
+            return String.format(Locale.ROOT, "lite unload gate=open probePassed=%dm ago", ageMin);
+        }
+        long ageHours = ageMin / 60L;
+        if (ageHours < 48L) {
+            return String.format(Locale.ROOT, "lite unload gate=open probePassed=%dh ago", ageHours);
+        }
+        return String.format(Locale.ROOT, "lite unload gate=open probePassed=%dd ago", ageHours / 24L);
     }
 }

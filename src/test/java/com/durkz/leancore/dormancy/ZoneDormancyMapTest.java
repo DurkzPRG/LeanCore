@@ -1,12 +1,14 @@
 package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.memory.MemoryTier;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ZoneDormancyMapTest {
@@ -50,5 +52,18 @@ class ZoneDormancyMapTest {
         assertEquals(ZoneState.WARM, map.idleStateForMinutes(3));
         assertEquals(ZoneState.DORMANT, map.idleStateForMinutes(10));
         assertEquals(ZoneState.FROZEN, map.idleStateForMinutes(25));
+    }
+
+    @Test
+    void liteUnloadIncludesDormantAtWatch() {
+        assertTrue(ZoneDormancyMap.qualifiesForUnload(ZoneState.FROZEN, MemoryTier.COMFORT, MemoryTier.WATCH));
+        assertTrue(ZoneDormancyMap.qualifiesForUnload(ZoneState.DORMANT, MemoryTier.WATCH, MemoryTier.WATCH));
+        assertFalse(ZoneDormancyMap.qualifiesForUnload(ZoneState.DORMANT, MemoryTier.COMFORT, MemoryTier.WATCH));
+    }
+
+    @Test
+    void standardUnloadRequiresTightForDormant() {
+        assertFalse(ZoneDormancyMap.qualifiesForUnload(ZoneState.DORMANT, MemoryTier.WATCH, MemoryTier.TIGHT));
+        assertTrue(ZoneDormancyMap.qualifiesForUnload(ZoneState.DORMANT, MemoryTier.TIGHT, MemoryTier.TIGHT));
     }
 }

@@ -113,6 +113,7 @@ public class MemoryGovernor {
             ZoneDormancyMap dormancyMap,
             double chunkSaturation,
             long liteSessionStartedMs,
+            long playerIdleSec,
             long nowMs
     ) {
         if (!config.enabled || !config.liteMemoryGovernorEnabled || !RuntimeGuard.active()) {
@@ -139,6 +140,8 @@ public class MemoryGovernor {
             commitLitePolicy(toApply, sample, nowMs);
         }
 
+        int unloadedChunks = zoneChunkUnloader.sweepLite(dormancyMap, sample.tier(), playerIdleSec);
+
         long since = lastChangeMs <= 0L ? 0L : (nowMs - lastChangeMs) / 1000L;
         lastStatus = new GovernorStatus(
                 true,
@@ -149,8 +152,8 @@ public class MemoryGovernor {
                 0,
                 0,
                 0,
-                0,
-                0,
+                unloadedChunks,
+                zoneChunkUnloader.lastCandidateZones(),
                 rolledBack,
                 since
         );

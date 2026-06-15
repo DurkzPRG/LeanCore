@@ -124,11 +124,11 @@ public final class SavingsReport {
 
         if (liteProfile) {
             lines.add(new Line(String.format(Locale.ROOT,
-                    "liteGov=%s liteView=%s liteLearning=%s | unload=%s",
+                    "liteGov=%s liteView=%s liteLearning=%s | liteUnload=%s",
                     config.liteMemoryGovernorEnabled,
                     config.liteViewRadiusEnabled,
                     config.liteLearningEnabled,
-                    config.unloadEnabled), "#888888"));
+                    config.liteUnloadEnabled), "#888888"));
         } else {
             lines.add(new Line(String.format(Locale.ROOT,
                     "viewRadiusGovernance=%s | learning=%s | unload=%s",

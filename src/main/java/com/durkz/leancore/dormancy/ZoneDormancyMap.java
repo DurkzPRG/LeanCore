@@ -192,6 +192,11 @@ public class ZoneDormancyMap {
     }
 
     public List<ZoneKey> unloadCandidateZones(MemoryTier tier) {
+        return unloadCandidateZones(tier, MemoryTier.TIGHT);
+    }
+
+    /** LITE: DORMANT candidates from WATCH+; STANDARD uses TIGHT+. */
+    public List<ZoneKey> unloadCandidateZones(MemoryTier tier, MemoryTier minDormantUnloadTier) {
         List<double[]> playerXZ = playerPositions();
         if (playerXZ.isEmpty()) {
             return List.of();
@@ -203,9 +208,7 @@ public class ZoneDormancyMap {
                 continue;
             }
             ZoneState state = entry.getValue();
-            if (state == ZoneState.FROZEN) {
-                ranked.add(Map.entry(entry.getKey(), minDistanceToPlayers(entry.getKey(), playerXZ)));
-            } else if (state == ZoneState.DORMANT && tier.ordinal() >= MemoryTier.TIGHT.ordinal()) {
+            if (qualifiesForUnload(state, tier, minDormantUnloadTier)) {
                 ranked.add(Map.entry(entry.getKey(), minDistanceToPlayers(entry.getKey(), playerXZ)));
             }
         }
@@ -265,5 +268,12 @@ public class ZoneDormancyMap {
 
     private static double zoneCenterBlock(int region) {
         return region * ZoneKey.regionChunks() * 16.0D + (ZoneKey.regionChunks() * 16.0D) / 2.0D;
+    }
+
+    static boolean qualifiesForUnload(ZoneState state, MemoryTier heapTier, MemoryTier minDormantUnloadTier) {
+        if (state == ZoneState.FROZEN) {
+            return true;
+        }
+        return state == ZoneState.DORMANT && heapTier.ordinal() >= minDormantUnloadTier.ordinal();
     }
 }
