@@ -156,7 +156,7 @@ public class PolicyApplier {
         int current = player.getClientViewRadius();
         int target = targetRadius(player, policy, demand, profile);
 
-        if (HoldoutSet.isHoldout(playerId) && target < current) {
+        if (HoldoutSet.isHoldout(playerId) && profile != RuntimeProfile.LITE && target < current) {
             return;
         }
         if (profile == RuntimeProfile.LITE && target < current && HeuristicDemandModel.isHighDemand(demand.demand())) {

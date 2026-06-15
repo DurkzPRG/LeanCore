@@ -125,6 +125,10 @@ public class LearningStore {
         return regionalPressure;
     }
 
+    public boolean persistenceEnabled() {
+        return config.learningEnabled || config.liteLearningEnabled;
+    }
+
     public void reinforceDemandOnReward(
             double reward,
             Map<UUID, RetentionDemand> demands,
@@ -226,7 +230,7 @@ public class LearningStore {
     }
 
     public void noteHeap(double heapRatio) {
-        if (!config.learningEnabled) {
+        if (!persistenceEnabled()) {
             return;
         }
         long nowMs = System.currentTimeMillis();
@@ -242,7 +246,7 @@ public class LearningStore {
     }
 
     public void flush(boolean force, Set<UUID> retainOnline) {
-        if (!config.learningEnabled) {
+        if (!persistenceEnabled()) {
             return;
         }
         if (!force && stateGeneration == flushedGeneration) {
@@ -392,8 +396,9 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v7 enabled=%s flushes=%d flushErr=%d lastFlush=%s players=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
+                "learning=v7 enabled=%s lite=%s flushes=%d flushErr=%d lastFlush=%s players=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
                 config.learningEnabled,
+                config.liteLearningEnabled,
                 flushCount,
                 persistFailCount,
                 formatLastFlush(now),

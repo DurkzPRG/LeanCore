@@ -15,8 +15,10 @@ class RuntimeProfileTest {
         config.governEnabled = true;
         config.learningEnabled = true;
         config.hudFeatureEnabled = true;
+        config.liteLearningEnabled = true;
         assertFalse(RuntimeProfile.LITE.runsGovernor(config));
         assertFalse(RuntimeProfile.LITE.runsLearning(config));
+        assertTrue(RuntimeProfile.LITE.runsLiteLearning(config));
         assertFalse(RuntimeProfile.LITE.runsHud(config));
         assertEquals(30, RuntimeProfile.LITE.tickIntervalSeconds(config));
     }
@@ -45,6 +47,16 @@ class RuntimeProfileTest {
         config.liteUnloadEnabled = false;
         assertFalse(RuntimeProfile.LITE.runsLiteUnload(config));
         assertFalse(RuntimeProfile.STANDARD.runsLiteUnload(config));
+    }
+
+    @Test
+    void liteRunsLiteLearningWhenEnabled() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.liteLearningEnabled = true;
+        assertTrue(RuntimeProfile.LITE.runsLiteLearning(config));
+        config.liteLearningEnabled = false;
+        assertFalse(RuntimeProfile.LITE.runsLiteLearning(config));
+        assertFalse(RuntimeProfile.STANDARD.runsLiteLearning(config));
     }
 
     @Test

@@ -225,7 +225,7 @@ public class MemoryRuntime {
     }
 
     private void schedulePersistIfNeeded() {
-        if (!running || scheduler == null || !config.learningEnabled || config.persistIntervalSeconds <= 0) {
+        if (!running || scheduler == null || !learningStore.persistenceEnabled() || config.persistIntervalSeconds <= 0) {
             return;
         }
         persistFuture = scheduler.scheduleAtFixedRate(() -> {
@@ -262,7 +262,7 @@ public class MemoryRuntime {
     private void persistLearning() {
         classifier.syncToStore(learningStore);
         var sample = lastSample;
-        if (sample != null) {
+        if (sample != null && config.learningEnabled) {
             learningStore.outcomeTracker().flushPending(
                     learningStore.heapAvg60s(),
                     sample.onlinePlayers(),
@@ -506,6 +506,12 @@ public class MemoryRuntime {
                 return;
             }
             var demands = classifier.snapshotDemands(nowMs);
+            if (activeProfile.runsLiteLearning(config)) {
+                learningStore.noteHeap(sample.heapUsedRatio());
+                learningStore.noteTier(sample.tier());
+                learningStore.noteDemands(demands);
+                classifier.syncToStore(learningStore);
+            }
             double chunkSaturation = sampleChunkSaturation();
             governor.tickLiteMode(
                     sample,

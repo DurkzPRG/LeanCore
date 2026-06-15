@@ -151,6 +151,48 @@ class LearningStorePersistenceTest {
         assertEquals(1, warnings.get());
     }
 
+    @Test
+    void liteLearningFlushesWithoutStandardLearning() throws Exception {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.learningEnabled = false;
+        config.liteLearningEnabled = true;
+        LearningStore store = new LearningStore(dataDir, config);
+        UUID playerId = UUID.randomUUID();
+
+        store.noteHeap(0.42D);
+        store.noteTier(MemoryTier.COMFORT);
+        store.noteDemands(Map.of(playerId, RetentionDemand.coldStart(PlayerBehavior.BUILDER)));
+        store.flush(true, java.util.Set.of(playerId));
+
+        Path gzip = dataDir.resolve(LearningStateCodec.GZ_FILE);
+        assertTrue(Files.exists(gzip));
+        assertTrue(store.persistenceEnabled());
+
+        LearningStore reloaded = new LearningStore(dataDir, config);
+        assertEquals(PlayerBehavior.BUILDER, reloaded.demandFor(playerId).debugLabel());
+        assertTrue(reloaded.statusLine().contains("enabled=false"));
+        assertTrue(reloaded.statusLine().contains("lite=true"));
+    }
+
+    @Test
+    void liteLearningSkipsBanditRewardUpdates() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.learningEnabled = false;
+        config.liteLearningEnabled = true;
+        LearningStore store = new LearningStore(dataDir, config);
+        UUID playerId = UUID.randomUUID();
+        PlayerFeatureState features = new PlayerFeatureState(playerId);
+
+        store.reinforceDemandOnReward(
+                0.5D,
+                Map.of(playerId, RetentionDemand.coldStart(PlayerBehavior.MINER)),
+                Map.of(playerId, features),
+                System.currentTimeMillis()
+        );
+
+        assertEquals(0, store.linearDemandModel().updates());
+    }
+
     private static LeanCoreConfig configWithLearning() {
         LeanCoreConfig config = new LeanCoreConfig();
         config.learningEnabled = true;

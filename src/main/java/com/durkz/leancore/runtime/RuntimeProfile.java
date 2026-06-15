@@ -38,6 +38,10 @@ public enum RuntimeProfile {
         return this == LITE && config.liteUnloadEnabled;
     }
 
+    public boolean runsLiteLearning(LeanCoreConfig config) {
+        return this == LITE && config.liteLearningEnabled;
+    }
+
     public boolean runsLearning(LeanCoreConfig config) {
         return switch (this) {
             case LITE -> false;
