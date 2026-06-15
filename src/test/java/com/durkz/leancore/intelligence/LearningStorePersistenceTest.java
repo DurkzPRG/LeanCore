@@ -193,6 +193,19 @@ class LearningStorePersistenceTest {
         assertEquals(0, store.linearDemandModel().updates());
     }
 
+    @Test
+    void quarantinesCorruptGzipPayload(@TempDir Path dataDir) throws Exception {
+        LeanCoreConfig config = configWithLearning();
+        Files.write(dataDir.resolve(LearningStateCodec.GZ_FILE), LearningStateCodecTestHelper.invalidTierPayload());
+
+        LearningStore store = new LearningStore(dataDir, config);
+
+        assertFalse(Files.exists(dataDir.resolve(LearningStateCodec.GZ_FILE)));
+        assertTrue(Files.list(dataDir).anyMatch(
+                path -> path.getFileName().toString().startsWith(LearningStateCodec.GZ_FILE + ".corrupt.")));
+        assertEquals(0, store.linearDemandModel().updates());
+    }
+
     private static LeanCoreConfig configWithLearning() {
         LeanCoreConfig config = new LeanCoreConfig();
         config.learningEnabled = true;

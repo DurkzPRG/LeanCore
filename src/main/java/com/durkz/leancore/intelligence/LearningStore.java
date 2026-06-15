@@ -490,9 +490,25 @@ public class LearningStore {
                 return;
             } catch (IOException ex) {
                 warnPersist("learning state v7 load failed; trying legacy", ex);
+                quarantineCorruptState(gzip);
+            } catch (RuntimeException ex) {
+                warnPersist("learning state v7 corrupt; trying legacy", ex);
+                quarantineCorruptState(gzip);
             }
         }
         loadLegacyProperties(nowMs);
+    }
+
+    private void quarantineCorruptState(Path gzip) {
+        if (gzip == null || !Files.isRegularFile(gzip)) {
+            return;
+        }
+        try {
+            Path quarantine = dataDir.resolve(
+                    LearningStateCodec.GZ_FILE + ".corrupt." + System.currentTimeMillis());
+            Files.move(gzip, quarantine, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException ignored) {
+        }
     }
 
     private void loadLegacyProperties(long nowMs) {

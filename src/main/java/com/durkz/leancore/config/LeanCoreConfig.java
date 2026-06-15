@@ -11,10 +11,13 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public class LeanCoreConfig {
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final int MAX_CLIENT_VIEW_RADIUS_CAP = 64;
+    private static final int MAX_UNLOAD_CHUNKS_CAP = 64;
 
     private transient File configFile;
 
@@ -136,11 +139,24 @@ public class LeanCoreConfig {
                 loaded.applyRuntimeDefaults();
                 return loaded;
             }
-        } catch (IOException ignored) {
+        } catch (Exception ignored) {
+            quarantineCorruptConfig(file);
         }
 
         config.applyRuntimeDefaults();
         return config;
+    }
+
+    private static void quarantineCorruptConfig(File file) {
+        if (file == null || !file.isFile()) {
+            return;
+        }
+        try {
+            Path corrupt = file.toPath().resolveSibling(
+                    file.getName() + ".corrupt." + System.currentTimeMillis());
+            Files.move(file.toPath(), corrupt, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException ignored) {
+        }
     }
 
     private void applyRuntimeDefaults() {
@@ -195,6 +211,10 @@ public class LeanCoreConfig {
         if (unloadMaxChunksPerSweep <= 0) {
             unloadMaxChunksPerSweep = 16;
         }
+        if (unloadMaxChunksPerSweep > MAX_UNLOAD_CHUNKS_CAP) {
+            unloadMaxChunksPerSweep = MAX_UNLOAD_CHUNKS_CAP;
+        }
+        sanitizeViewRadiusSettings();
         if (hudUpdateIntervalSeconds <= 0) {
             hudUpdateIntervalSeconds = 3;
         }
@@ -228,6 +248,21 @@ public class LeanCoreConfig {
     /** Package-visible for unit tests. */
     void normalizeDefaults() {
         applyRuntimeDefaults();
+    }
+
+    private void sanitizeViewRadiusSettings() {
+        if (minClientViewRadius <= 0) {
+            minClientViewRadius = 4;
+        }
+        if (maxClientViewRadius <= 0) {
+            maxClientViewRadius = 32;
+        }
+        if (maxClientViewRadius > MAX_CLIENT_VIEW_RADIUS_CAP) {
+            maxClientViewRadius = MAX_CLIENT_VIEW_RADIUS_CAP;
+        }
+        if (minClientViewRadius > maxClientViewRadius) {
+            minClientViewRadius = maxClientViewRadius;
+        }
     }
 
     private void sanitizeLiteSettings() {
@@ -273,9 +308,20 @@ public class LeanCoreConfig {
         if (configFile == null) {
             return;
         }
-        try (Writer writer = Files.newBufferedWriter(configFile.toPath(), StandardCharsets.UTF_8)) {
+        Path target = configFile.toPath();
+        Path temp = target.resolveSibling(configFile.getName() + ".tmp");
+        try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
             GSON.toJson(this, writer);
         } catch (IOException ignored) {
+            return;
+        }
+        try {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException ignored) {
+            try {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException ignoredAgain) {
+            }
         }
     }
 }

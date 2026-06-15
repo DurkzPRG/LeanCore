@@ -27,6 +27,10 @@ final class LearningStateCodec {
     static final int VERSION = 7;
     static final String GZ_FILE = "learning.state.gz";
     private static final int MAGIC = 0x454C434C; // "LCLC" little-endian
+    private static final int MAX_COLLECTION_ENTRIES = 512;
+    private static final int MAX_PLAYER_ENTRIES = 4096;
+    private static final int MAX_KEY_BYTES = 256;
+    private static final int MAX_FLOAT_ARRAY_LEN = 64;
 
     private LearningStateCodec() {
     }
@@ -108,7 +112,7 @@ final class LearningStateCodec {
         in.readByte(); // flags
 
         long savedAtMs = in.readLong();
-        MemoryTier lastTier = MemoryTier.values()[in.readByte() & 0xFF];
+        MemoryTier lastTier = readMemoryTier(in.readByte());
         double regionalPressure = in.readFloat();
 
         int learnCompleted = in.readInt();
@@ -171,6 +175,9 @@ final class LearningStateCodec {
 
     private static double[] readFloatArray(DataInputStream in, int expected) throws IOException {
         int len = in.readShort() & 0xFFFF;
+        if (len > MAX_FLOAT_ARRAY_LEN) {
+            throw new IOException("learning state float array too large: " + len);
+        }
         double[] values = new double[Math.max(expected, len)];
         for (int i = 0; i < len; i++) {
             values[i] = in.readFloat();
@@ -222,10 +229,10 @@ final class LearningStateCodec {
     }
 
     private static Map<String, BanditArm> readBandit(DataInputStream in) throws IOException {
-        int count = in.readShort() & 0xFFFF;
+        int count = readCollectionCount(in.readShort() & 0xFFFF, "bandit");
         Map<String, BanditArm> arms = new LinkedHashMap<>(count);
         for (int i = 0; i < count; i++) {
-            int keyLen = in.readShort() & 0xFFFF;
+            int keyLen = readKeyLength(in.readShort() & 0xFFFF);
             byte[] keyBytes = in.readNBytes(keyLen);
             String key = new String(keyBytes, StandardCharsets.UTF_8);
             BanditArm arm = new BanditArm();
@@ -253,10 +260,10 @@ final class LearningStateCodec {
     }
 
     private static Map<String, Long> readBlacklist(DataInputStream in) throws IOException {
-        int count = in.readShort() & 0xFFFF;
+        int count = readCollectionCount(in.readShort() & 0xFFFF, "blacklist");
         Map<String, Long> entries = new LinkedHashMap<>(count);
         for (int i = 0; i < count; i++) {
-            int keyLen = in.readShort() & 0xFFFF;
+            int keyLen = readKeyLength(in.readShort() & 0xFFFF);
             byte[] keyBytes = in.readNBytes(keyLen);
             String key = new String(keyBytes, StandardCharsets.UTF_8);
             entries.put(key, in.readLong());
@@ -302,6 +309,9 @@ final class LearningStateCodec {
 
     private static Map<UUID, PlayerRecord> readPlayers(DataInputStream in) throws IOException {
         int count = in.readInt();
+        if (count < 0 || count > MAX_PLAYER_ENTRIES) {
+            throw new IOException("invalid learning state player count: " + count);
+        }
         Map<UUID, PlayerRecord> players = new LinkedHashMap<>(count);
         for (int i = 0; i < count; i++) {
             UUID id = new UUID(in.readLong(), in.readLong());
@@ -341,6 +351,28 @@ final class LearningStateCodec {
             return PlayerBehavior.UNKNOWN;
         }
         return values[ordinal];
+    }
+
+    private static MemoryTier readMemoryTier(int ordinal) throws IOException {
+        MemoryTier[] values = MemoryTier.values();
+        if (ordinal < 0 || ordinal >= values.length) {
+            throw new IOException("invalid learning state memory tier: " + ordinal);
+        }
+        return values[ordinal];
+    }
+
+    private static int readCollectionCount(int count, String label) throws IOException {
+        if (count < 0 || count > MAX_COLLECTION_ENTRIES) {
+            throw new IOException("invalid learning state " + label + " count: " + count);
+        }
+        return count;
+    }
+
+    private static int readKeyLength(int keyLen) throws IOException {
+        if (keyLen < 0 || keyLen > MAX_KEY_BYTES) {
+            throw new IOException("invalid learning state key length: " + keyLen);
+        }
+        return keyLen;
     }
 
     static final class BanditArm {
