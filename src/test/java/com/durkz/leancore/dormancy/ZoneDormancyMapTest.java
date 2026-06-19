@@ -66,4 +66,21 @@ class ZoneDormancyMapTest {
         assertFalse(ZoneDormancyMap.qualifiesForUnload(ZoneState.DORMANT, MemoryTier.WATCH, MemoryTier.TIGHT));
         assertTrue(ZoneDormancyMap.qualifiesForUnload(ZoneState.DORMANT, MemoryTier.TIGHT, MemoryTier.TIGHT));
     }
+
+    @Test
+    void predictedPositionBiasesUnloadTowardZonesBehind() {
+        ZoneKey ahead = new ZoneKey(WORLD, 2, 0);
+        ZoneKey behind = new ZoneKey(WORLD, -2, 0);
+
+        // Player at origin: the zone behind is physically closer than the zone ahead.
+        List<double[]> current = List.of(new double[]{0.0D, 0.0D});
+        assertTrue(ZoneDormancyMap.minDistanceToPlayers(behind, current)
+                < ZoneDormancyMap.minDistanceToPlayers(ahead, current));
+
+        // With the predicted position shifted forward (+x), the zone behind becomes the farthest,
+        // so it ranks first for unload while the zone ahead is protected.
+        List<double[]> predicted = List.of(new double[]{200.0D, 0.0D});
+        assertTrue(ZoneDormancyMap.minDistanceToPlayers(behind, predicted)
+                > ZoneDormancyMap.minDistanceToPlayers(ahead, predicted));
+    }
 }

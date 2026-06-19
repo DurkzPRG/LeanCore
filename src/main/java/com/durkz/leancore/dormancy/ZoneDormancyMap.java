@@ -22,9 +22,14 @@ public class ZoneDormancyMap {
     private final Map<ZoneKey, ZoneState> zones = new ConcurrentHashMap<>();
     private final Map<ZoneKey, Long> lastHotAtMs = new ConcurrentHashMap<>();
     private final Set<ZoneKey> pinned = ConcurrentHashMap.newKeySet();
+    private volatile PredictedPositionSource positionSource;
 
     public ZoneDormancyMap(LeanCoreConfig config) {
         this.config = config;
+    }
+
+    public void setPredictedPositionSource(PredictedPositionSource source) {
+        this.positionSource = source;
     }
 
     public void refreshFromPlayers() {
@@ -242,6 +247,9 @@ public class ZoneDormancyMap {
     }
 
     private List<double[]> playerPositions() {
+        PredictedPositionSource source = this.positionSource;
+        boolean usePredicted = config.motionModelEnabled && source != null;
+        long horizonMs = Math.max(0, config.motionPredictionHorizonSeconds) * 1000L;
         List<double[]> out = new ArrayList<>();
         for (PlayerRef ref : Universe.get().getPlayers()) {
             if (!ref.isValid()) {
@@ -251,12 +259,19 @@ public class ZoneDormancyMap {
             if (t == null || t.getPosition() == null) {
                 continue;
             }
+            if (usePredicted) {
+                double[] predicted = source.predictedXZ(ref.getUuid(), horizonMs);
+                if (predicted != null) {
+                    out.add(predicted);
+                    continue;
+                }
+            }
             out.add(new double[]{t.getPosition().x, t.getPosition().z});
         }
         return out;
     }
 
-    private static double minDistanceToPlayers(ZoneKey key, List<double[]> playerXZ) {
+    static double minDistanceToPlayers(ZoneKey key, List<double[]> playerXZ) {
         double cx = zoneCenterBlock(key.regionX());
         double cz = zoneCenterBlock(key.regionZ());
         double min = Double.MAX_VALUE;

@@ -111,6 +111,7 @@ public class MemoryRuntime {
         SessionSavingsTracker sessionSavings = new SessionSavingsTracker();
         MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext(), sessionSavings);
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
+        dormancyMap.setPredictedPositionSource(classifier.features());
         ZoneChunkUnloader zoneChunkUnloader = new ZoneChunkUnloader(config, learningStore.unloadOutcomeTracker());
         RetentionAllocator allocator = new RetentionAllocator(config);
         PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker(), classifier.features());
