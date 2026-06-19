@@ -19,8 +19,16 @@ class RuntimeProfileTest {
         assertFalse(RuntimeProfile.LITE.runsGovernor(config));
         assertFalse(RuntimeProfile.LITE.runsLearning(config));
         assertTrue(RuntimeProfile.LITE.runsLiteLearning(config));
-        assertFalse(RuntimeProfile.LITE.runsHud(config));
         assertEquals(30, RuntimeProfile.LITE.tickIntervalSeconds(config));
+    }
+
+    @Test
+    void liteRunsHudWhenFeatureEnabled() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.hudFeatureEnabled = true;
+        assertTrue(RuntimeProfile.LITE.runsHud(config));
+        config.hudFeatureEnabled = false;
+        assertFalse(RuntimeProfile.LITE.runsHud(config));
     }
 
     @Test

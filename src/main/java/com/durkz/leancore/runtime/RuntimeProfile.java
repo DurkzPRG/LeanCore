@@ -51,8 +51,7 @@ public enum RuntimeProfile {
 
     public boolean runsHud(LeanCoreConfig config) {
         return switch (this) {
-            case LITE -> false;
-            case STANDARD, FULL -> config.hudFeatureEnabled;
+            case LITE, STANDARD, FULL -> config.hudFeatureEnabled;
         };
     }
 

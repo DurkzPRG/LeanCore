@@ -11,4 +11,9 @@ Group #LeanCoreHudRoot {
     Text: "";
     Style: (FontSize: 10, TextColor: #aaaaaa(1));
   }
+
+  Label #LcLine3 {
+    Text: "";
+    Style: (FontSize: 10, TextColor: #55ffff(1));
+  }
 }

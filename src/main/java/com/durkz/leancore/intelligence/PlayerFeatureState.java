@@ -39,6 +39,10 @@ public class PlayerFeatureState {
     private final RecentActivityBuffer recentActivity = new RecentActivityBuffer();
     private final PlayerMotionModel motion = new PlayerMotionModel();
 
+    private volatile int baseViewRadius = -1;
+    private volatile int lastAppliedViewRadius = -1;
+    private volatile int lastMotionBoostBlocks;
+
     private long lastExplorePulseMs;
     private long lastActivityMs;
     private long firstSeenMs;
@@ -252,6 +256,27 @@ public class PlayerFeatureState {
 
     public double motionViewScale(double minSpeedBlocksPerSec, double maxBoost) {
         return motion.viewScale(minSpeedBlocksPerSec, maxBoost);
+    }
+
+    public void setBaseViewRadius(int radius) {
+        this.baseViewRadius = radius;
+    }
+
+    public int baseViewRadius() {
+        return baseViewRadius;
+    }
+
+    public void noteMotionApplied(int appliedRadius, int boostBlocks) {
+        this.lastAppliedViewRadius = appliedRadius;
+        this.lastMotionBoostBlocks = boostBlocks;
+    }
+
+    public int lastAppliedViewRadius() {
+        return lastAppliedViewRadius;
+    }
+
+    public int lastMotionBoostBlocks() {
+        return lastMotionBoostBlocks;
     }
 
     private void dampenCombat() {

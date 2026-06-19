@@ -124,6 +124,9 @@ public class LeanCoreConfig {
     public boolean motionViewRadiusBoostEnabled = false;
     public double motionViewRadiusMaxBoost = 1.15D;
     public double motionMinSpeedBlocksPerSecond = 3.0D;
+    // Fast cadence (seconds) for the live motion sampler + HUD refresh. Must stay under the
+    // motion model reset window (5s) so velocity accumulates between samples.
+    public int motionSampleIntervalSeconds = 1;
 
     public static LeanCoreConfig load(Path dataDirectory) {
         File directory = dataDirectory.toFile();
@@ -289,6 +292,12 @@ public class LeanCoreConfig {
         }
         if (motionMinSpeedBlocksPerSecond <= 0.0D) {
             motionMinSpeedBlocksPerSecond = 3.0D;
+        }
+        if (motionSampleIntervalSeconds < 1) {
+            motionSampleIntervalSeconds = 1;
+        }
+        if (motionSampleIntervalSeconds > 4) {
+            motionSampleIntervalSeconds = 4;
         }
     }
 

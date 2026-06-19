@@ -75,6 +75,28 @@ public class PlayerFeatureTracker implements ViewRadiusCache, PredictedPositionS
         return state == null ? 1.0D : state.motionViewScale(minSpeedBlocksPerSec, maxBoost);
     }
 
+    @Override
+    public void noteBaseViewRadius(UUID playerId, int baseRadius) {
+        PlayerFeatureState state = states.get(playerId);
+        if (state != null) {
+            state.setBaseViewRadius(baseRadius);
+        }
+    }
+
+    @Override
+    public int baseViewRadius(UUID playerId) {
+        PlayerFeatureState state = states.get(playerId);
+        return state == null ? -1 : state.baseViewRadius();
+    }
+
+    @Override
+    public void noteMotionApplied(UUID playerId, int appliedRadius, int boostBlocks) {
+        PlayerFeatureState state = states.get(playerId);
+        if (state != null) {
+            state.noteMotionApplied(appliedRadius, boostBlocks);
+        }
+    }
+
     public void samplePositions(Collection<PlayerRef> online, long nowMs, boolean spatialProbe) {
         for (PlayerFeatureState state : states.values()) {
             state.tick(nowMs);

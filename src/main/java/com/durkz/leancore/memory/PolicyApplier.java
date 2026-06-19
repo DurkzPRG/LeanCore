@@ -156,10 +156,9 @@ public class PolicyApplier {
         int current = player.getClientViewRadius();
         int target = targetRadius(player, policy, demand, profile);
 
-        if (config.motionModelEnabled && config.motionViewRadiusBoostEnabled && viewRadiusCache != null) {
-            double motionScale = viewRadiusCache.motionViewScale(
-                    playerId, config.motionMinSpeedBlocksPerSecond, config.motionViewRadiusMaxBoost);
-            target = applyMotionBoost(target, motionScale, config.maxClientViewRadius);
+        // Anchor radius (without motion boost). The live motion sampler boosts on top of this.
+        if (viewRadiusCache != null) {
+            viewRadiusCache.noteBaseViewRadius(playerId, target);
         }
 
         if (HoldoutSet.isHoldout(playerId) && profile != RuntimeProfile.LITE && target < current) {
@@ -202,6 +201,50 @@ public class PolicyApplier {
                 ? Math.max(config.minClientViewRadius, config.liteMinClientViewRadius)
                 : config.minClientViewRadius;
         return clamp(scaled, minClient, config.maxClientViewRadius);
+    }
+
+    /**
+     * Live cinematic view-radius boost. Runs on the world thread at the fast motion cadence,
+     * independent of the governor policy throttle, so the radius tracks acceleration in near
+     * real time. Upward only: it boosts above the governor anchor and reverts to it when the
+     * player slows down. Must be called from the world thread for the given players.
+     */
+    public void applyMotionLive(Collection<PlayerRef> online, RuntimeProfile profile) {
+        if (online == null || !RuntimeGuard.active() || viewRadiusCache == null) {
+            return;
+        }
+        if (!config.motionModelEnabled || !config.motionViewRadiusBoostEnabled) {
+            return;
+        }
+        int minDelta = Math.max(1, config.minViewRadiusDelta);
+        for (PlayerRef playerRef : online) {
+            if (playerRef == null || !playerRef.isValid()) {
+                continue;
+            }
+            Ref<EntityStore> ref = playerRef.getReference();
+            if (ref == null) {
+                continue;
+            }
+            Store<EntityStore> store = ref.getStore();
+            Player player = store.getComponent(ref, Player.getComponentType());
+            if (player == null) {
+                continue;
+            }
+            UUID playerId = playerRef.getUuid();
+            int current = player.getClientViewRadius();
+            int base = viewRadiusCache.baseViewRadius(playerId);
+            if (base <= 0) {
+                base = current;
+                viewRadiusCache.noteBaseViewRadius(playerId, base);
+            }
+            double motionScale = viewRadiusCache.motionViewScale(
+                    playerId, config.motionMinSpeedBlocksPerSecond, config.motionViewRadiusMaxBoost);
+            int boosted = applyMotionBoost(base, motionScale, config.maxClientViewRadius);
+            viewRadiusCache.noteMotionApplied(playerId, boosted, boosted - base);
+            if (Math.abs(boosted - current) >= minDelta) {
+                player.setClientViewRadius(boosted);
+            }
+        }
     }
 
     /** Motion boost is upward only and capped at maxClientViewRadius. */

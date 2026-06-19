@@ -46,6 +46,7 @@ public class MemoryRuntime {
     private final SessionModeDetector sessionDetector;
     private final LearningStore learningStore;
     private final MemoryGovernor governor;
+    private final PolicyApplier policyApplier;
     private final SessionSavingsTracker sessionSavings;
     private final MemoryHudService hudService;
     private final CriticalWebhookNotifier webhookNotifier;
@@ -63,7 +64,9 @@ public class MemoryRuntime {
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> tickFuture;
     private ScheduledFuture<?> persistFuture;
+    private ScheduledFuture<?> motionFuture;
     private final AtomicBoolean governorWorldTickPending = new AtomicBoolean(false);
+    private final AtomicBoolean motionTickPending = new AtomicBoolean(false);
     private long lastDormancyRefreshMs;
     private long lastLiteHeapSampleMs;
     private double lastLiteX;
@@ -82,6 +85,7 @@ public class MemoryRuntime {
             SessionModeDetector sessionDetector,
             LearningStore learningStore,
             MemoryGovernor governor,
+            PolicyApplier policyApplier,
             SessionSavingsTracker sessionSavings,
             MemoryHudService hudService,
             CriticalWebhookNotifier webhookNotifier,
@@ -96,6 +100,7 @@ public class MemoryRuntime {
         this.sessionDetector = sessionDetector;
         this.learningStore = learningStore;
         this.governor = governor;
+        this.policyApplier = policyApplier;
         this.sessionSavings = sessionSavings;
         this.hudService = hudService;
         this.webhookNotifier = webhookNotifier;
@@ -129,6 +134,7 @@ public class MemoryRuntime {
                 new SessionModeDetector(config),
                 learningStore,
                 governor,
+                applier,
                 sessionSavings,
                 hudService,
                 webhookNotifier,
@@ -151,6 +157,7 @@ public class MemoryRuntime {
         long initialDelay = Math.max(0, config.runtimeInitialDelaySeconds);
         scheduleTick(initialDelay);
         schedulePersistIfNeeded();
+        scheduleMotionTickIfNeeded();
         if (config.dedicatedServerMode && config.viewRadiusGovernanceEnabled) {
             governor.setViewRadiusGraceUntilMs(System.currentTimeMillis() + DedicatedBootstrap.VIEW_RADIUS_GRACE_MS);
         }
@@ -181,6 +188,11 @@ public class MemoryRuntime {
             persistFuture.cancel(true);
             persistFuture = null;
         }
+        if (motionFuture != null) {
+            motionFuture.cancel(true);
+            motionFuture = null;
+        }
+        motionTickPending.set(false);
         stopScheduler();
         persistLearning();
         if (hudService != null) {
@@ -240,6 +252,70 @@ public class MemoryRuntime {
                 plugin.getLogger().atWarning().withCause(e).log("learning flush failed");
             }
         }, config.persistIntervalSeconds, config.persistIntervalSeconds, TimeUnit.SECONDS);
+    }
+
+    private void scheduleMotionTickIfNeeded() {
+        if (!running || scheduler == null) {
+            return;
+        }
+        if (!config.motionModelEnabled && !config.hudFeatureEnabled) {
+            return;
+        }
+        long interval = Math.max(1, config.motionSampleIntervalSeconds);
+        motionFuture = scheduler.scheduleAtFixedRate(
+                this::runMotionTick, interval, interval, TimeUnit.SECONDS);
+    }
+
+    private void runMotionTick() {
+        if (!running || !config.enabled) {
+            return;
+        }
+        if (!config.motionModelEnabled && !config.hudFeatureEnabled) {
+            return;
+        }
+        Collection<PlayerRef> online = Universe.get().getPlayers();
+        if (online.isEmpty()) {
+            return;
+        }
+        World world = resolvePrimaryWorld(online);
+        if (world == null) {
+            return;
+        }
+        if (!motionTickPending.compareAndSet(false, true)) {
+            return;
+        }
+        long nowMs = System.currentTimeMillis();
+        try {
+            UUID worldUuid = world.getWorldConfig().getUuid();
+            world.execute(() -> {
+                try {
+                    if (!running) {
+                        return;
+                    }
+                    GovernorWorldContext.enter(worldUuid);
+                    try {
+                        if (config.motionModelEnabled) {
+                            classifier.samplePositionsLite(online, nowMs);
+                            if (config.motionViewRadiusBoostEnabled && policyApplier != null) {
+                                policyApplier.applyMotionLive(online, activeProfile);
+                            }
+                        }
+                        if (RuntimeGuard.active() && activeProfile.runsHud(config) && hudService != null) {
+                            hudService.refresh(this);
+                        }
+                    } finally {
+                        GovernorWorldContext.exit();
+                    }
+                } catch (Exception e) {
+                    plugin.getLogger().atWarning().withCause(e).log("motion tick failed");
+                } finally {
+                    motionTickPending.set(false);
+                }
+            });
+        } catch (RuntimeException e) {
+            motionTickPending.set(false);
+            plugin.getLogger().atFine().withCause(e).log("motion tick not queued — world shutting down");
+        }
     }
 
     private void runTick() {

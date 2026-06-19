@@ -4,6 +4,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.dormancy.ZoneKey;
 import com.durkz.leancore.dormancy.ZoneState;
+import com.durkz.leancore.intelligence.PlayerFeatureState;
 import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemorySnapshot;
@@ -123,9 +124,39 @@ public class MemoryHudService {
             }
             RetentionDemand demand = demands.getOrDefault(ref.getUuid(), runtime.learningStore().demandFor(ref.getUuid()));
             ZoneState localZone = localZoneState(ref, dormancy);
-            hud.setLines(formatLine1(sample), formatLine2(gov, demand, localZone));
+            PlayerFeatureState features = runtime.classifier().features().snapshot().get(ref.getUuid());
+            hud.setLines(formatLine1(sample), formatLine2(gov, demand, localZone), formatMotionLine(features));
             hud.pushUpdate();
         }
+    }
+
+    private String formatMotionLine(PlayerFeatureState features) {
+        if (!config.motionModelEnabled || features == null) {
+            return "";
+        }
+        long horizonMs = Math.max(0, config.motionPredictionHorizonSeconds) * 1000L;
+        double[] predicted = features.predictedXZ(horizonMs);
+        String predStr = predicted == null
+                ? "n/a"
+                : String.format(Locale.ROOT, "%.0f,%.0f", predicted[0], predicted[1]);
+        String view;
+        if (!config.motionViewRadiusBoostEnabled) {
+            view = "vr off";
+        } else {
+            int applied = features.lastAppliedViewRadius();
+            if (applied <= 0) {
+                applied = features.cachedViewRadius();
+            }
+            int boost = features.lastMotionBoostBlocks();
+            view = boost > 0
+                    ? String.format(Locale.ROOT, "vr %d (+%d)", applied, boost)
+                    : String.format(Locale.ROOT, "vr %d (idle)", applied);
+        }
+        return String.format(Locale.ROOT, "mv %.1fb/s c%.2f pred %s | %s",
+                features.speedBlocksPerSec(),
+                features.motionConfidence(),
+                predStr,
+                view);
     }
 
     private static ZoneState localZoneState(PlayerRef ref, ZoneDormancyMap dormancy) {
@@ -138,6 +169,9 @@ public class MemoryHudService {
     }
 
     private static String formatLine1(MemorySnapshot sample) {
+        if (sample == null) {
+            return "heap n/a (sampling)";
+        }
         return String.format(Locale.ROOT, "heap %d/%d MB (%.0f%%) %s",
                 sample.heapUsedBytes() / (1024 * 1024),
                 sample.heapMaxBytes() / (1024 * 1024),

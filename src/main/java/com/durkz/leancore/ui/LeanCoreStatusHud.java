@@ -10,14 +10,16 @@ public class LeanCoreStatusHud extends CustomUIHud {
 
     private String line1 = "";
     private String line2 = "";
+    private String line3 = "";
 
     public LeanCoreStatusHud(PlayerRef playerRef) {
         super(playerRef, KEY, 40);
     }
 
-    public void setLines(String line1, String line2) {
+    public void setLines(String line1, String line2, String line3) {
         this.line1 = line1 == null ? "" : line1;
         this.line2 = line2 == null ? "" : line2;
+        this.line3 = line3 == null ? "" : line3;
     }
 
     public void pushUpdate() {
@@ -31,5 +33,6 @@ public class LeanCoreStatusHud extends CustomUIHud {
         ui.append("Hud/Durkz_LeanCore_Status.ui");
         ui.set("#LcLine1.Text", line1);
         ui.set("#LcLine2.Text", line2);
+        ui.set("#LcLine3.Text", line3);
     }
 }
