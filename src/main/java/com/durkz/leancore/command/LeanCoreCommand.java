@@ -338,7 +338,26 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     features.emaBuild60(),
                     features.emaCraft60(),
                     features.emaCombat60()), "#AAAAAA");
+            LeanCorePlugin lp = plugin(ctx);
+            if (lp != null && lp.config().motionModelEnabled) {
+                say(ctx, motionLine(features, lp.config()), "#AAAAAA");
+            }
         }
+    }
+
+    private static String motionLine(PlayerFeatureState features, LeanCoreConfig cfg) {
+        long horizonMs = Math.max(0, cfg.motionPredictionHorizonSeconds) * 1000L;
+        double[] predicted = features.predictedXZ(horizonMs);
+        String predStr = predicted == null
+                ? "n/a"
+                : String.format(Locale.ROOT, "%.0f,%.0f", predicted[0], predicted[1]);
+        return String.format(Locale.ROOT,
+                "motion speed=%.1f b/s conf=%.2f horizon=%ds predicted=%s viewBoost=%.2f",
+                features.speedBlocksPerSec(),
+                features.motionConfidence(),
+                cfg.motionPredictionHorizonSeconds,
+                predStr,
+                features.motionViewScale(cfg.motionMinSpeedBlocksPerSecond, cfg.motionViewRadiusMaxBoost));
     }
 
     private static final class HudCmd extends CommandBase {
@@ -604,6 +623,12 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 say(ctx, "probe PASSED — unload gate open (saved to LeanCore.json)", "#55FF55");
             } else {
                 say(ctx, "probe FAILED — fix failing steps before enabling unload", "#FF8888");
+            }
+            if (plugin.config().motionModelEnabled) {
+                PlayerFeatureState features = rt.classifier().features().snapshot().get(playerRef.getUuid());
+                if (features != null) {
+                    say(ctx, motionLine(features, plugin.config()), "#AAAAAA");
+                }
             }
         }
     }

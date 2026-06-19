@@ -156,6 +156,12 @@ public class PolicyApplier {
         int current = player.getClientViewRadius();
         int target = targetRadius(player, policy, demand, profile);
 
+        if (config.motionModelEnabled && config.motionViewRadiusBoostEnabled && viewRadiusCache != null) {
+            double motionScale = viewRadiusCache.motionViewScale(
+                    playerId, config.motionMinSpeedBlocksPerSecond, config.motionViewRadiusMaxBoost);
+            target = applyMotionBoost(target, motionScale, config.maxClientViewRadius);
+        }
+
         if (HoldoutSet.isHoldout(playerId) && profile != RuntimeProfile.LITE && target < current) {
             return;
         }
@@ -196,6 +202,15 @@ public class PolicyApplier {
                 ? Math.max(config.minClientViewRadius, config.liteMinClientViewRadius)
                 : config.minClientViewRadius;
         return clamp(scaled, minClient, config.maxClientViewRadius);
+    }
+
+    /** Motion boost is upward only and capped at maxClientViewRadius. */
+    static int applyMotionBoost(int target, double motionScale, int maxClientViewRadius) {
+        if (motionScale <= 1.0D) {
+            return target;
+        }
+        int boosted = (int) Math.round(target * motionScale);
+        return Math.min(Math.max(target, boosted), maxClientViewRadius);
     }
 
     private static int clamp(int value, int min, int max) {

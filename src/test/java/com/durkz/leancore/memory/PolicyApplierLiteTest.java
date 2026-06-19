@@ -48,4 +48,12 @@ class PolicyApplierLiteTest {
 
         assertEquals(12, target);
     }
+
+    @Test
+    void motionBoostIsUpwardOnlyAndCapped() {
+        assertEquals(20, PolicyApplier.applyMotionBoost(20, 1.0D, 32), "no scale leaves target unchanged");
+        assertEquals(24, PolicyApplier.applyMotionBoost(20, 1.2D, 32), "boost rounds up");
+        assertEquals(22, PolicyApplier.applyMotionBoost(20, 1.2D, 22), "boost never exceeds maxClientViewRadius");
+        assertEquals(20, PolicyApplier.applyMotionBoost(20, 0.8D, 32), "scale below 1 never cuts the target");
+    }
 }
