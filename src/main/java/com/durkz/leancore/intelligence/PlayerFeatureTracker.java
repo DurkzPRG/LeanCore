@@ -1,5 +1,6 @@
 package com.durkz.leancore.intelligence;
 
+import com.durkz.leancore.dormancy.PredictedPositionSource;
 import com.durkz.leancore.probe.PlayerSpatialProbe;
 import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -9,7 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class PlayerFeatureTracker implements ViewRadiusCache {
+public class PlayerFeatureTracker implements ViewRadiusCache, PredictedPositionSource {
 
     private final LearningStore learningStore;
     private final Map<UUID, PlayerFeatureState> states = new ConcurrentHashMap<>();
@@ -60,6 +61,18 @@ public class PlayerFeatureTracker implements ViewRadiusCache {
         if (state != null) {
             state.noteViewRadius(serverRadius, clientRadius);
         }
+    }
+
+    @Override
+    public double[] predictedXZ(UUID playerId, long horizonMs) {
+        PlayerFeatureState state = states.get(playerId);
+        return state == null ? null : state.predictedXZ(horizonMs);
+    }
+
+    @Override
+    public double motionViewScale(UUID playerId, double minSpeedBlocksPerSec, double maxBoost) {
+        PlayerFeatureState state = states.get(playerId);
+        return state == null ? 1.0D : state.motionViewScale(minSpeedBlocksPerSec, maxBoost);
     }
 
     public void samplePositions(Collection<PlayerRef> online, long nowMs, boolean spatialProbe) {

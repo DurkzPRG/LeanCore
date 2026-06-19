@@ -117,6 +117,14 @@ public class LeanCoreConfig {
     public int liteUnloadIdleSeconds = 180;
     public int liteUnloadMaxChunksPerSweep = 8;
 
+    // v1.6.0 Frente 1: motion model (off by default). Predicted position biases unload away
+    // from zones ahead of the player; optional view-radius boost for fast movers.
+    public boolean motionModelEnabled = false;
+    public int motionPredictionHorizonSeconds = 3;
+    public boolean motionViewRadiusBoostEnabled = false;
+    public double motionViewRadiusMaxBoost = 1.15D;
+    public double motionMinSpeedBlocksPerSecond = 3.0D;
+
     public static LeanCoreConfig load(Path dataDirectory) {
         File directory = dataDirectory.toFile();
         if (!directory.exists()) {
@@ -231,6 +239,7 @@ public class LeanCoreConfig {
             gcHintMinIntervalSeconds = 600;
         }
         sanitizeLiteSettings();
+        sanitizeMotionSettings();
         if (learningMaxPersistedPlayers < 0) {
             learningMaxPersistedPlayers = 512;
         }
@@ -262,6 +271,24 @@ public class LeanCoreConfig {
         }
         if (minClientViewRadius > maxClientViewRadius) {
             minClientViewRadius = maxClientViewRadius;
+        }
+    }
+
+    private void sanitizeMotionSettings() {
+        if (motionPredictionHorizonSeconds < 1) {
+            motionPredictionHorizonSeconds = 1;
+        }
+        if (motionPredictionHorizonSeconds > 10) {
+            motionPredictionHorizonSeconds = 10;
+        }
+        if (motionViewRadiusMaxBoost < 1.0D) {
+            motionViewRadiusMaxBoost = 1.0D;
+        }
+        if (motionViewRadiusMaxBoost > 1.5D) {
+            motionViewRadiusMaxBoost = 1.5D;
+        }
+        if (motionMinSpeedBlocksPerSecond <= 0.0D) {
+            motionMinSpeedBlocksPerSecond = 3.0D;
         }
     }
 

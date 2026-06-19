@@ -37,6 +37,7 @@ public class PlayerFeatureState {
     private double emaCombat60;
 
     private final RecentActivityBuffer recentActivity = new RecentActivityBuffer();
+    private final PlayerMotionModel motion = new PlayerMotionModel();
 
     private long lastExplorePulseMs;
     private long lastActivityMs;
@@ -218,6 +219,7 @@ public class PlayerFeatureState {
     public void samplePosition(double x, double z) {
         long nowMs = System.currentTimeMillis();
         tick(nowMs);
+        motion.update(x, z, nowMs);
         if (positioned) {
             double dist = Math.hypot(x - lastX, z - lastZ);
             if (dist >= SIGNIFICANT_MOVE_BLOCKS) {
@@ -234,6 +236,22 @@ public class PlayerFeatureState {
         lastX = x;
         lastZ = z;
         positioned = true;
+    }
+
+    public double[] predictedXZ(long horizonMs) {
+        return motion.predictedXZ(horizonMs);
+    }
+
+    public double speedBlocksPerSec() {
+        return motion.speedBlocksPerSec();
+    }
+
+    public double motionConfidence() {
+        return motion.confidence();
+    }
+
+    public double motionViewScale(double minSpeedBlocksPerSec, double maxBoost) {
+        return motion.viewScale(minSpeedBlocksPerSec, maxBoost);
     }
 
     private void dampenCombat() {
