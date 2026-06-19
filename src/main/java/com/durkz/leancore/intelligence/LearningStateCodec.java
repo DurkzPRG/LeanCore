@@ -1,5 +1,6 @@
 package com.durkz.leancore.intelligence;
 
+import com.durkz.leancore.dormancy.ZoneReuseModel;
 import com.durkz.leancore.memory.MemoryTier;
 
 import java.io.ByteArrayInputStream;
@@ -19,16 +20,19 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
- * Compact gzip binary persistence for learning state (schema v7).
+ * Compact gzip binary persistence for learning state (schema v8).
+ * v8 adds per-zone reuse stats; v7 payloads still load (with empty zones).
  * Typical size: a few KB solo, tens of KB with hundreds of players.
  */
 final class LearningStateCodec {
 
-    static final int VERSION = 7;
+    static final int VERSION = 8;
+    static final int VERSION_WITHOUT_ZONES = 7;
     static final String GZ_FILE = "learning.state.gz";
     private static final int MAGIC = 0x454C434C; // "LCLC" little-endian
     private static final int MAX_COLLECTION_ENTRIES = 512;
     private static final int MAX_PLAYER_ENTRIES = 4096;
+    private static final int MAX_ZONE_ENTRIES = 65_536;
     private static final int MAX_KEY_BYTES = 256;
     private static final int MAX_FLOAT_ARRAY_LEN = 64;
 
@@ -98,6 +102,7 @@ final class LearningStateCodec {
         writeBandit(out, s.banditArms);
         writeBlacklist(out, s.blacklist);
         writePlayers(out, s.players);
+        writeZones(out, s.zones);
     }
 
     private static Snapshot readSnapshot(DataInputStream in) throws IOException {
@@ -106,7 +111,7 @@ final class LearningStateCodec {
             throw new IOException("invalid learning state magic");
         }
         int version = in.readShort();
-        if (version != VERSION) {
+        if (version != VERSION && version != VERSION_WITHOUT_ZONES) {
             throw new IOException("unsupported learning state version: " + version);
         }
         in.readByte(); // flags
@@ -138,6 +143,7 @@ final class LearningStateCodec {
         Map<String, BanditArm> banditArms = readBandit(in);
         Map<String, Long> blacklist = readBlacklist(in);
         Map<UUID, PlayerRecord> players = readPlayers(in);
+        List<ZoneReuseModel.Record> zones = version >= VERSION ? readZones(in) : new ArrayList<>();
 
         return new Snapshot(
                 savedAtMs,
@@ -162,7 +168,8 @@ final class LearningStateCodec {
                 activityWeights,
                 banditArms,
                 blacklist,
-                players
+                players,
+                zones
         );
     }
 
@@ -345,6 +352,47 @@ final class LearningStateCodec {
         );
     }
 
+    private static void writeZones(DataOutputStream out, List<ZoneReuseModel.Record> zones) throws IOException {
+        List<ZoneReuseModel.Record> records = zones == null ? List.of() : zones;
+        int count = Math.min(records.size(), MAX_ZONE_ENTRIES);
+        out.writeInt(count);
+        int written = 0;
+        for (ZoneReuseModel.Record r : records) {
+            if (written >= count) {
+                break;
+            }
+            out.writeLong(r.worldUuid().getMostSignificantBits());
+            out.writeLong(r.worldUuid().getLeastSignificantBits());
+            out.writeInt(r.regionX());
+            out.writeInt(r.regionZ());
+            out.writeInt(r.visitCount());
+            out.writeLong(r.lastHotAtMs());
+            out.writeDouble(r.emaIntervalMs());
+            out.writeLong(r.lastSeenMs());
+            written++;
+        }
+    }
+
+    private static List<ZoneReuseModel.Record> readZones(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        if (count < 0 || count > MAX_ZONE_ENTRIES) {
+            throw new IOException("invalid learning state zone count: " + count);
+        }
+        List<ZoneReuseModel.Record> zones = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            UUID world = new UUID(in.readLong(), in.readLong());
+            int regionX = in.readInt();
+            int regionZ = in.readInt();
+            int visitCount = in.readInt();
+            long lastHotAtMs = in.readLong();
+            double emaIntervalMs = in.readDouble();
+            long lastSeenMs = in.readLong();
+            zones.add(new ZoneReuseModel.Record(world, regionX, regionZ,
+                    visitCount, lastHotAtMs, emaIntervalMs, lastSeenMs));
+        }
+        return zones;
+    }
+
     private static PlayerBehavior readBehavior(int ordinal) {
         PlayerBehavior[] values = PlayerBehavior.values();
         if (ordinal < 0 || ordinal >= values.length) {
@@ -437,7 +485,8 @@ final class LearningStateCodec {
             double[][] activityWeights,
             Map<String, BanditArm> banditArms,
             Map<String, Long> blacklist,
-            Map<UUID, PlayerRecord> players
+            Map<UUID, PlayerRecord> players,
+            List<ZoneReuseModel.Record> zones
     ) {
     }
 }

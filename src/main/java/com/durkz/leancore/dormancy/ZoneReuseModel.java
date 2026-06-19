@@ -1,0 +1,175 @@
+package com.durkz.leancore.dormancy;
+
+import com.durkz.leancore.intelligence.FeatureNormalizer;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Per-zone reuse-distance + survival model (caching theory). Tracks how often and how recently each
+ * zone is revisited and estimates a revisit score in [0,1] used to bias chunk unload and to scale
+ * the dormancy thresholds. Small and interpretable: an EMA of inter-visit intervals plus an
+ * exponential survival decay and an LFU-flavored frequency term. Persisted across sessions.
+ */
+public final class ZoneReuseModel {
+
+    private static final double INTERVAL_BLEND = 0.4D;
+    private static final double VISIT_NORM = 20.0D;
+    private static final double MIN_INTERVAL_MS = 1000.0D;
+    private static final double NEUTRAL_SCORE = 0.5D;
+    static final int MIN_VISITS_FOR_SCORE = 2;
+
+    private final Map<ZoneKey, ZoneReuseStat> stats = new ConcurrentHashMap<>();
+
+    /** Record a non-HOT -> HOT transition for the zone. */
+    public void noteHot(ZoneKey key, long nowMs) {
+        if (key == null) {
+            return;
+        }
+        stats.compute(key, (k, prev) -> prev == null
+                ? ZoneReuseStat.firstVisit(nowMs)
+                : prev.revisit(nowMs));
+    }
+
+    /** Revisit likelihood in [0,1]. Neutral (0.5) until enough visits are observed. */
+    public double revisitScore(ZoneKey key, long nowMs) {
+        ZoneReuseStat s = key == null ? null : stats.get(key);
+        if (s == null || s.visitCount < MIN_VISITS_FOR_SCORE) {
+            return NEUTRAL_SCORE;
+        }
+        return s.revisitScore(nowMs);
+    }
+
+    /** Multiplier for dormant/frozen thresholds: high-frequency zones decay slower. 1.0 until learned. */
+    public double thresholdScale(ZoneKey key, double min, double max) {
+        ZoneReuseStat s = key == null ? null : stats.get(key);
+        if (s == null || s.visitCount < MIN_VISITS_FOR_SCORE) {
+            return 1.0D;
+        }
+        return s.thresholdScale(min, max);
+    }
+
+    public int visitCount(ZoneKey key) {
+        ZoneReuseStat s = key == null ? null : stats.get(key);
+        return s == null ? 0 : s.visitCount;
+    }
+
+    public int size() {
+        return stats.size();
+    }
+
+    /** Drop zones unseen past the TTL, then cap to maxEntries by evicting the least-recently-seen. */
+    public int prune(long nowMs, long ttlMs, int maxEntries) {
+        int removed = 0;
+        if (ttlMs > 0L) {
+            long cutoff = nowMs - ttlMs;
+            var it = stats.entrySet().iterator();
+            while (it.hasNext()) {
+                if (it.next().getValue().lastSeenMs < cutoff) {
+                    it.remove();
+                    removed++;
+                }
+            }
+        }
+        if (maxEntries > 0 && stats.size() > maxEntries) {
+            List<Map.Entry<ZoneKey, ZoneReuseStat>> all = new ArrayList<>(stats.entrySet());
+            all.sort(Comparator.comparingLong(e -> e.getValue().lastSeenMs));
+            int toRemove = stats.size() - maxEntries;
+            for (int i = 0; i < toRemove && i < all.size(); i++) {
+                stats.remove(all.get(i).getKey());
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    /** Export persistable records for zones with at least {@code minVisits} visits. */
+    public List<Record> export(int minVisits) {
+        List<Record> out = new ArrayList<>();
+        for (Map.Entry<ZoneKey, ZoneReuseStat> e : stats.entrySet()) {
+            ZoneReuseStat s = e.getValue();
+            if (s.visitCount < minVisits) {
+                continue;
+            }
+            ZoneKey k = e.getKey();
+            out.add(new Record(k.worldUuid(), k.regionX(), k.regionZ(),
+                    s.visitCount, s.lastHotAtMs, s.emaIntervalMs, s.lastSeenMs));
+        }
+        return out;
+    }
+
+    public void importRecord(Record r) {
+        if (r == null || r.worldUuid() == null) {
+            return;
+        }
+        stats.put(new ZoneKey(r.worldUuid(), r.regionX(), r.regionZ()),
+                ZoneReuseStat.restore(r.visitCount(), r.lastHotAtMs(), r.emaIntervalMs(), r.lastSeenMs()));
+    }
+
+    public void clear() {
+        stats.clear();
+    }
+
+    public record Record(UUID worldUuid, int regionX, int regionZ,
+                          int visitCount, long lastHotAtMs, double emaIntervalMs, long lastSeenMs) {
+    }
+
+    static final class ZoneReuseStat {
+        int visitCount;
+        long lastHotAtMs;
+        double emaIntervalMs;
+        long lastSeenMs;
+
+        static ZoneReuseStat firstVisit(long now) {
+            ZoneReuseStat s = new ZoneReuseStat();
+            s.visitCount = 1;
+            s.lastHotAtMs = now;
+            s.emaIntervalMs = 0.0D;
+            s.lastSeenMs = now;
+            return s;
+        }
+
+        static ZoneReuseStat restore(int visitCount, long lastHotAtMs, double emaIntervalMs, long lastSeenMs) {
+            ZoneReuseStat s = new ZoneReuseStat();
+            s.visitCount = Math.max(0, visitCount);
+            s.lastHotAtMs = lastHotAtMs;
+            s.emaIntervalMs = Math.max(0.0D, emaIntervalMs);
+            s.lastSeenMs = lastSeenMs;
+            return s;
+        }
+
+        ZoneReuseStat revisit(long now) {
+            long interval = Math.max((long) MIN_INTERVAL_MS, now - lastHotAtMs);
+            if (emaIntervalMs <= 0.0D) {
+                emaIntervalMs = interval;
+            } else {
+                emaIntervalMs = emaIntervalMs * (1.0D - INTERVAL_BLEND) + interval * INTERVAL_BLEND;
+            }
+            visitCount++;
+            lastHotAtMs = now;
+            lastSeenMs = now;
+            return this;
+        }
+
+        double revisitScore(long nowMs) {
+            double mean = Math.max(MIN_INTERVAL_MS, emaIntervalMs);
+            double t = Math.max(0.0D, nowMs - lastHotAtMs);
+            double recency = Math.exp(-t / mean);
+            double frequency = frequency();
+            return FeatureNormalizer.clamp01(recency * (0.5D + 0.5D * frequency));
+        }
+
+        double thresholdScale(double min, double max) {
+            double scale = 0.5D + 1.5D * frequency();
+            return Math.max(min, Math.min(max, scale));
+        }
+
+        private double frequency() {
+            return FeatureNormalizer.clamp01(Math.log(1.0D + visitCount) / Math.log(1.0D + VISIT_NORM));
+        }
+    }
+}

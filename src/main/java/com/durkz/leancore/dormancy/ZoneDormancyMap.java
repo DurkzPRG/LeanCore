@@ -23,6 +23,7 @@ public class ZoneDormancyMap {
     private final Map<ZoneKey, Long> lastHotAtMs = new ConcurrentHashMap<>();
     private final Set<ZoneKey> pinned = ConcurrentHashMap.newKeySet();
     private volatile PredictedPositionSource positionSource;
+    private volatile ZoneReuseModel reuseModel;
 
     public ZoneDormancyMap(LeanCoreConfig config) {
         this.config = config;
@@ -32,13 +33,22 @@ public class ZoneDormancyMap {
         this.positionSource = source;
     }
 
+    public void setZoneReuseModel(ZoneReuseModel model) {
+        this.reuseModel = model;
+    }
+
     public void refreshFromPlayers() {
         refreshFromPlayerZones(collectHotPlayerZones(), System.currentTimeMillis());
     }
 
     void refreshFromPlayerZones(Collection<ZoneKey> hotZones, long now) {
         Set<ZoneKey> hotNow = new HashSet<>(hotZones);
+        ZoneReuseModel reuse = this.reuseModel;
+        boolean reuseEnabled = config.zoneReuseModelEnabled && reuse != null;
         for (ZoneKey key : hotNow) {
+            if (reuseEnabled && zones.get(key) != ZoneState.HOT) {
+                reuse.noteHot(key, now);
+            }
             zones.put(key, ZoneState.HOT);
             lastHotAtMs.put(key, now);
         }
@@ -49,7 +59,7 @@ public class ZoneDormancyMap {
                 continue;
             }
             long idleMin = (now - entry.getValue()) / 60_000L;
-            zones.put(key, idleStateForMinutes(idleMin));
+            zones.put(key, stateForZone(key, idleMin));
         }
 
         for (ZoneKey key : pinned) {
@@ -65,6 +75,24 @@ public class ZoneDormancyMap {
             return ZoneState.FROZEN;
         }
         if (idleMin >= config.dormantAfterMinutes) {
+            return ZoneState.DORMANT;
+        }
+        return ZoneState.WARM;
+    }
+
+    private ZoneState stateForZone(ZoneKey key, long idleMin) {
+        ZoneReuseModel reuse = this.reuseModel;
+        if (!config.zoneReuseModelEnabled || reuse == null) {
+            return idleStateForMinutes(idleMin);
+        }
+        double scale = reuse.thresholdScale(
+                key, config.zoneReuseThresholdScaleMin, config.zoneReuseThresholdScaleMax);
+        long dormantMin = Math.round(config.dormantAfterMinutes * scale);
+        long frozenMin = Math.round(config.frozenAfterMinutes * scale);
+        if (idleMin >= frozenMin) {
+            return ZoneState.FROZEN;
+        }
+        if (idleMin >= dormantMin) {
             return ZoneState.DORMANT;
         }
         return ZoneState.WARM;
@@ -149,7 +177,8 @@ public class ZoneDormancyMap {
                     entry.getValue(),
                     idleMinutes(key),
                     pinned.contains(key),
-                    (int) Math.round(minDistanceToPlayers(key, playerXZ))
+                    (int) Math.round(minDistanceToPlayers(key, playerXZ)),
+                    revisitScore(key)
             ));
         }
         rows.sort((a, b) -> {
@@ -207,6 +236,7 @@ public class ZoneDormancyMap {
             return List.of();
         }
 
+        long now = System.currentTimeMillis();
         List<Map.Entry<ZoneKey, Double>> ranked = new ArrayList<>();
         for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
             if (pinned.contains(entry.getKey())) {
@@ -214,7 +244,7 @@ public class ZoneDormancyMap {
             }
             ZoneState state = entry.getValue();
             if (qualifiesForUnload(state, tier, minDormantUnloadTier)) {
-                ranked.add(Map.entry(entry.getKey(), minDistanceToPlayers(entry.getKey(), playerXZ)));
+                ranked.add(Map.entry(entry.getKey(), evictionPriority(entry.getKey(), playerXZ, now)));
             }
         }
         ranked.sort(Map.Entry.comparingByValue(Comparator.reverseOrder()));
@@ -231,9 +261,10 @@ public class ZoneDormancyMap {
             return 0;
         }
 
+        long now = System.currentTimeMillis();
         List<Map.Entry<ZoneKey, Double>> dormant = zones.entrySet().stream()
                 .filter(e -> e.getValue() == ZoneState.DORMANT && !pinned.contains(e.getKey()))
-                .map(e -> Map.entry(e.getKey(), minDistanceToPlayers(e.getKey(), playerXZ)))
+                .map(e -> Map.entry(e.getKey(), evictionPriority(e.getKey(), playerXZ, now)))
                 .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
                 .limit(maxZones)
                 .collect(Collectors.toList());
@@ -244,6 +275,37 @@ public class ZoneDormancyMap {
             demoted++;
         }
         return demoted;
+    }
+
+    /**
+     * Eviction priority (higher = evict first): far zones unlikely to be revisited rank highest.
+     * When the reuse model is off, this collapses to plain distance so behaviour is unchanged.
+     */
+    double evictionPriority(ZoneKey key, List<double[]> playerXZ, long nowMs) {
+        double distance = minDistanceToPlayers(key, playerXZ);
+        ZoneReuseModel reuse = this.reuseModel;
+        if (!config.zoneReuseModelEnabled || reuse == null) {
+            return distance;
+        }
+        double revisit = reuse.revisitScore(key, nowMs);
+        return distance * (1.0D + config.zoneReuseRankWeight * (1.0D - revisit));
+    }
+
+    /** Revisit likelihood in [0,1] for the zone, or neutral (0.5) when the model is off. */
+    public double revisitScore(ZoneKey key) {
+        ZoneReuseModel reuse = this.reuseModel;
+        if (!config.zoneReuseModelEnabled || reuse == null || key == null) {
+            return 0.5D;
+        }
+        return reuse.revisitScore(key, System.currentTimeMillis());
+    }
+
+    public double thresholdScale(ZoneKey key) {
+        ZoneReuseModel reuse = this.reuseModel;
+        if (!config.zoneReuseModelEnabled || reuse == null || key == null) {
+            return 1.0D;
+        }
+        return reuse.thresholdScale(key, config.zoneReuseThresholdScaleMin, config.zoneReuseThresholdScaleMax);
     }
 
     private List<double[]> playerPositions() {

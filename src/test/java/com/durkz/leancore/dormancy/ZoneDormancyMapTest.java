@@ -83,4 +83,77 @@ class ZoneDormancyMapTest {
         assertTrue(ZoneDormancyMap.minDistanceToPlayers(behind, predicted)
                 > ZoneDormancyMap.minDistanceToPlayers(ahead, predicted));
     }
+
+    @Test
+    void reuseRankingProtectsFrequentlyRevisitedZone() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        ZoneDormancyMap map = new ZoneDormancyMap(config);
+        ZoneReuseModel model = new ZoneReuseModel();
+        map.setZoneReuseModel(model);
+
+        ZoneKey frequentFar = new ZoneKey(WORLD, 5, 0);
+        ZoneKey rareNear = new ZoneKey(WORLD, 4, 0);
+        long t = 0L;
+        for (int i = 0; i < 26; i++) {
+            model.noteHot(frequentFar, t);
+            t += 30_000L;
+        }
+        long evalTime = t - 30_000L;
+        model.noteHot(rareNear, evalTime);
+
+        List<double[]> players = List.of(new double[]{0.0D, 0.0D});
+
+        config.zoneReuseModelEnabled = false;
+        assertTrue(map.evictionPriority(frequentFar, players, evalTime)
+                        > map.evictionPriority(rareNear, players, evalTime),
+                "with reuse off, the farther zone evicts first");
+
+        config.zoneReuseModelEnabled = true;
+        config.zoneReuseRankWeight = 0.5D;
+        assertTrue(map.evictionPriority(rareNear, players, evalTime)
+                        > map.evictionPriority(frequentFar, players, evalTime),
+                "with reuse on, the frequently revisited far zone is protected");
+    }
+
+    @Test
+    void adaptiveThresholdExtendsForFrequentZone() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.zoneReuseModelEnabled = true;
+        ZoneDormancyMap map = new ZoneDormancyMap(config);
+        ZoneReuseModel model = new ZoneReuseModel();
+        map.setZoneReuseModel(model);
+
+        ZoneKey frequent = new ZoneKey(WORLD, 1, 1);
+        long t = 0L;
+        for (int i = 0; i < 25; i++) {
+            model.noteHot(frequent, t);
+            t += 30_000L;
+        }
+        assertTrue(map.thresholdScale(frequent) > 1.0D, "frequent zone gets longer thresholds");
+        assertEquals(1.0D, map.thresholdScale(new ZoneKey(WORLD, 9, 9)), 1e-9, "unseen zone stays neutral");
+    }
+
+    @Test
+    void frequentZoneResistsDormancy() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.zoneReuseModelEnabled = true;
+        config.dormantAfterMinutes = 8;
+        config.frozenAfterMinutes = 20;
+        ZoneDormancyMap map = new ZoneDormancyMap(config);
+        ZoneReuseModel model = new ZoneReuseModel();
+        map.setZoneReuseModel(model);
+
+        ZoneKey frequent = new ZoneKey(WORLD, 7, 7);
+        long t = 0L;
+        for (int i = 0; i < 25; i++) {
+            map.refreshFromPlayerZones(List.of(frequent), t);
+            t += 30_000L;
+            map.refreshFromPlayerZones(List.of(), t);
+            t += 30_000L;
+        }
+
+        // 10 minutes idle: base config would demote to DORMANT, but the scaled threshold keeps it WARM.
+        map.refreshFromPlayerZones(List.of(), t + 10 * 60_000L);
+        assertEquals(ZoneState.WARM, map.stateOf(frequent));
+    }
 }

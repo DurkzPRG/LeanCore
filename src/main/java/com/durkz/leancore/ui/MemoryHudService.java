@@ -125,7 +125,8 @@ public class MemoryHudService {
             RetentionDemand demand = demands.getOrDefault(ref.getUuid(), runtime.learningStore().demandFor(ref.getUuid()));
             ZoneState localZone = localZoneState(ref, dormancy);
             PlayerFeatureState features = runtime.classifier().features().snapshot().get(ref.getUuid());
-            hud.setLines(formatLine1(sample), formatLine2(gov, demand, localZone), formatMotionLine(features));
+            String line2 = formatLine2(gov, demand, localZone) + formatReuseSuffix(ref, dormancy);
+            hud.setLines(formatLine1(sample), line2, formatMotionLine(features));
             hud.pushUpdate();
         }
     }
@@ -157,6 +158,19 @@ public class MemoryHudService {
                 features.motionConfidence(),
                 predStr,
                 view);
+    }
+
+    private String formatReuseSuffix(PlayerRef ref, ZoneDormancyMap dormancy) {
+        if (!config.zoneReuseModelEnabled) {
+            return "";
+        }
+        Transform t = ref.getTransform();
+        if (t == null || t.getPosition() == null) {
+            return "";
+        }
+        ZoneKey key = ZoneKey.fromBlockCoords(ref.getWorldUuid(), t.getPosition().x, t.getPosition().z);
+        return String.format(Locale.ROOT, " | reuse %.2f x%.2f",
+                dormancy.revisitScore(key), dormancy.thresholdScale(key));
     }
 
     private static ZoneState localZoneState(PlayerRef ref, ZoneDormancyMap dormancy) {

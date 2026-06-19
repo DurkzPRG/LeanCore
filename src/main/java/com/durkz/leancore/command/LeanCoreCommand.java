@@ -475,12 +475,17 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                     map.countByState(ZoneState.DORMANT),
                     map.countByState(ZoneState.FROZEN),
                     map.pinnedZones().size()), "#FFAA00");
+            boolean showReuse = config.zoneReuseModelEnabled;
             for (ZoneHeatmapEntry row : map.heatmapEntries(limit)) {
-                say(ctx, String.format(Locale.ROOT, "%s %s idle=%dm dist=%d%s",
+                String reuse = showReuse
+                        ? String.format(Locale.ROOT, " reuse=%.2f", row.revisitScore())
+                        : "";
+                say(ctx, String.format(Locale.ROOT, "%s %s idle=%dm dist=%d%s%s",
                         row.key(),
                         row.state(),
                         row.idleMinutes(),
                         row.distanceBlocks(),
+                        reuse,
                         row.pinned() ? " PIN" : ""), "#AAAAAA");
             }
         }

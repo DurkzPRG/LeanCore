@@ -50,7 +50,7 @@ class LearningStorePersistenceTest {
         LearningStore reloaded = new LearningStore(dataDir, config);
         assertEquals(PlayerBehavior.MINER, reloaded.demandFor(playerId).debugLabel());
         assertTrue(reloaded.policyBandit().armCount() >= 1);
-        assertTrue(reloaded.statusLine().contains("learning=v7"));
+        assertTrue(reloaded.statusLine().contains("learning=v8"));
         assertTrue(reloaded.statusLine().contains("flushErr=0"));
     }
 

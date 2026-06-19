@@ -5,6 +5,7 @@ public record ZoneHeatmapEntry(
         ZoneState state,
         long idleMinutes,
         boolean pinned,
-        int distanceBlocks
+        int distanceBlocks,
+        double revisitScore
 ) {
 }

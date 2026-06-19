@@ -1,6 +1,7 @@
 package com.durkz.leancore.intelligence;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.dormancy.ZoneReuseModel;
 import com.durkz.leancore.memory.MemoryTier;
 import com.durkz.leancore.memory.ServerContextTracker;
 
@@ -29,9 +30,10 @@ public class LearningStore {
         void onWarning(String message, Throwable cause);
     }
 
-    static final int SCHEMA_VERSION = 7;
+    static final int SCHEMA_VERSION = 8;
     private static final String STATE_FILE_LEGACY = "learning.state";
     private static final long HEAP_DIRTY_INTERVAL_MS = 60_000L;
+    private static final int MIN_PERSISTED_ZONE_VISITS = 2;
 
     private final Path dataDir;
     private final LeanCoreConfig config;
@@ -47,6 +49,7 @@ public class LearningStore {
     private final UnloadOutcomeTracker unloadOutcomeTracker;
     private final HoldoutCohortTracker holdoutCohort = new HoldoutCohortTracker();
     private final PolicyBlacklistTracker policyBlacklist = new PolicyBlacklistTracker();
+    private final ZoneReuseModel zoneReuseModel = new ZoneReuseModel();
 
     private volatile double regionalPressure;
     private MemoryTier lastTier = MemoryTier.COMFORT;
@@ -115,6 +118,10 @@ public class LearningStore {
 
     public PolicyBlacklistTracker policyBlacklist() {
         return policyBlacklist;
+    }
+
+    public ZoneReuseModel zoneReuseModel() {
+        return zoneReuseModel;
     }
 
     public void setRegionalPressure(double pressure) {
@@ -254,6 +261,7 @@ public class LearningStore {
         }
         long now = System.currentTimeMillis();
         lastPrunedCount = prunePlayers(now, retainOnline);
+        pruneZones(now);
         LearningStateCodec.Snapshot snapshot = buildSnapshot(now);
 
         try {
@@ -319,6 +327,13 @@ public class LearningStore {
         return Math.max(0, before - players.size());
     }
 
+    private void pruneZones(long nowMs) {
+        long ttlMs = config.zoneReuseTtlDays > 0
+                ? config.zoneReuseTtlDays * 86_400_000L
+                : 0L;
+        zoneReuseModel.prune(nowMs, ttlMs, config.zoneReuseMaxPersistedZones);
+    }
+
     private LearningStateCodec.Snapshot buildSnapshot(long nowMs) {
         Map<String, LearningStateCodec.BanditArm> banditArms = new LinkedHashMap<>();
         for (Map.Entry<String, PolicyBandit.ArmState> e : policyBandit.arms().entrySet()) {
@@ -359,7 +374,8 @@ public class LearningStore {
                 activityClassifier.weights(),
                 banditArms,
                 policyBlacklist.snapshotActive(nowMs),
-                playerRecords
+                playerRecords,
+                zoneReuseModel.export(MIN_PERSISTED_ZONE_VISITS)
         );
     }
 
@@ -391,18 +407,26 @@ public class LearningStore {
         for (Map.Entry<UUID, LearningStateCodec.PlayerRecord> e : snapshot.players().entrySet()) {
             players.put(e.getKey(), PersistedPlayer.fromRecord(e.getValue()));
         }
+
+        zoneReuseModel.clear();
+        if (snapshot.zones() != null) {
+            for (ZoneReuseModel.Record record : snapshot.zones()) {
+                zoneReuseModel.importRecord(record);
+            }
+        }
     }
 
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v7 enabled=%s lite=%s flushes=%d flushErr=%d lastFlush=%s players=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
+                "learning=v8 enabled=%s lite=%s flushes=%d flushErr=%d lastFlush=%s players=%d zones=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
                 config.learningEnabled,
                 config.liteLearningEnabled,
                 flushCount,
                 persistFailCount,
                 formatLastFlush(now),
                 players.size(),
+                zoneReuseModel.size(),
                 formatStateSize(lastStateFileBytes),
                 lastPrunedCount,
                 lastTier,

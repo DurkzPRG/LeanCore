@@ -128,6 +128,16 @@ public class LeanCoreConfig {
     // motion model reset window (5s) so velocity accumulates between samples.
     public int motionSampleIntervalSeconds = 1;
 
+    // v1.6.0 Frente 2: per-zone reuse-distance + survival model (off by default). Biases chunk
+    // unload toward zones unlikely to be revisited and scales dormancy thresholds per zone.
+    // Persisted across sessions (capped + TTL pruned).
+    public boolean zoneReuseModelEnabled = false;
+    public double zoneReuseRankWeight = 0.5D;
+    public double zoneReuseThresholdScaleMin = 0.5D;
+    public double zoneReuseThresholdScaleMax = 2.0D;
+    public int zoneReuseMaxPersistedZones = 4096;
+    public int zoneReuseTtlDays = 30;
+
     public static LeanCoreConfig load(Path dataDirectory) {
         File directory = dataDirectory.toFile();
         if (!directory.exists()) {
@@ -298,6 +308,43 @@ public class LeanCoreConfig {
         }
         if (motionSampleIntervalSeconds > 4) {
             motionSampleIntervalSeconds = 4;
+        }
+        sanitizeZoneReuseSettings();
+    }
+
+    private void sanitizeZoneReuseSettings() {
+        if (zoneReuseRankWeight < 0.0D) {
+            zoneReuseRankWeight = 0.0D;
+        }
+        if (zoneReuseRankWeight > 2.0D) {
+            zoneReuseRankWeight = 2.0D;
+        }
+        if (zoneReuseThresholdScaleMin < 0.1D) {
+            zoneReuseThresholdScaleMin = 0.1D;
+        }
+        if (zoneReuseThresholdScaleMin > 1.0D) {
+            zoneReuseThresholdScaleMin = 1.0D;
+        }
+        if (zoneReuseThresholdScaleMax < 1.0D) {
+            zoneReuseThresholdScaleMax = 1.0D;
+        }
+        if (zoneReuseThresholdScaleMax > 4.0D) {
+            zoneReuseThresholdScaleMax = 4.0D;
+        }
+        if (zoneReuseThresholdScaleMax < zoneReuseThresholdScaleMin) {
+            zoneReuseThresholdScaleMax = zoneReuseThresholdScaleMin;
+        }
+        if (zoneReuseMaxPersistedZones < 0) {
+            zoneReuseMaxPersistedZones = 0;
+        }
+        if (zoneReuseMaxPersistedZones > 65536) {
+            zoneReuseMaxPersistedZones = 65536;
+        }
+        if (zoneReuseTtlDays < 0) {
+            zoneReuseTtlDays = 0;
+        }
+        if (zoneReuseTtlDays > 365) {
+            zoneReuseTtlDays = 365;
         }
     }
 
