@@ -308,7 +308,8 @@ public class ZoneDormancyMap {
                 continue;
             }
             ZoneState state = entry.getValue();
-            if (qualifiesForUnload(state, tier, minDormantUnloadTier)) {
+            if (qualifiesForUnload(state, tier, minDormantUnloadTier)
+                    && !isProtectedByView(entry.getKey(), playerXZ)) {
                 ranked.add(Map.entry(entry.getKey(), evictionPriority(entry.getKey(), playerXZ, now)));
             }
         }
@@ -329,6 +330,7 @@ public class ZoneDormancyMap {
         long now = System.currentTimeMillis();
         List<Map.Entry<ZoneKey, Double>> dormant = zones.entrySet().stream()
                 .filter(e -> e.getValue() == ZoneState.DORMANT && !pinned.contains(e.getKey()))
+                .filter(e -> !isProtectedByView(e.getKey(), playerXZ))
                 .map(e -> Map.entry(e.getKey(), evictionPriority(e.getKey(), playerXZ, now)))
                 .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
                 .limit(maxZones)
@@ -407,6 +409,7 @@ public class ZoneDormancyMap {
         PredictedPositionSource source = this.positionSource;
         boolean usePredicted = config.motionModelEnabled && source != null;
         long horizonMs = Math.max(0, config.motionPredictionHorizonSeconds) * 1000L;
+        double fallbackViewBlocks = Math.max(1, config.maxClientViewRadius) * 16.0D;
         List<PlayerPos> out = new ArrayList<>();
         for (PlayerRef ref : Universe.get().getPlayers()) {
             if (!ref.isValid()) {
@@ -417,42 +420,70 @@ public class ZoneDormancyMap {
                 continue;
             }
             java.util.UUID worldUuid = ref.getWorldUuid();
+            double viewBlocks = fallbackViewBlocks;
+            if (source != null) {
+                int chunks = source.viewRadiusChunks(ref.getUuid());
+                if (chunks > 0) {
+                    viewBlocks = chunks * 16.0D;
+                }
+            }
+            out.add(new PlayerPos(worldUuid, t.getPosition().x, t.getPosition().z, viewBlocks));
+            // A predicted point protects the cone ahead too.
             if (usePredicted) {
                 double[] predicted = source.predictedXZ(ref.getUuid(), horizonMs);
                 if (predicted != null) {
-                    out.add(new PlayerPos(worldUuid, predicted[0], predicted[1]));
-                    continue;
+                    out.add(new PlayerPos(worldUuid, predicted[0], predicted[1], viewBlocks));
                 }
             }
-            out.add(new PlayerPos(worldUuid, t.getPosition().x, t.getPosition().z));
         }
         return out;
     }
 
     /**
-     * Closest same-world player to the zone center. Players in other worlds are ignored, so a
-     * zone is never "protected" by someone in a different world (and a world with no players
-     * online ranks as MAX_VALUE, i.e. evict-first).
+     * Distance from the nearest same-world player to the zone's nearest chunk (point-to-AABB, not to
+     * the center). Other worlds are ignored, so a world with nobody online ranks as MAX_VALUE.
      */
     static double minDistanceToPlayers(ZoneKey key, List<PlayerPos> playerXZ) {
-        double cx = zoneCenterBlock(key.regionX());
-        double cz = zoneCenterBlock(key.regionZ());
         double min = Double.MAX_VALUE;
         for (PlayerPos p : playerXZ) {
             if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
                 continue;
             }
-            min = Math.min(min, Math.hypot(cx - p.x(), cz - p.z()));
+            min = Math.min(min, edgeDistance(key, p.x(), p.z()));
         }
         return min;
     }
 
-    /** Player position tagged with its world, so distance ranking stays world-isolated. */
-    record PlayerPos(java.util.UUID world, double x, double z) {
+    /**
+     * Zone is protected (never an unload candidate) when its nearest chunk is within any same-world
+     * player's view distance plus one region of slack. Trades reclaim near players for zero thrash.
+     */
+    static boolean isProtectedByView(ZoneKey key, List<PlayerPos> playerXZ) {
+        double margin = ZoneKey.regionChunks() * 16.0D;
+        for (PlayerPos p : playerXZ) {
+            if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
+                continue;
+            }
+            if (edgeDistance(key, p.x(), p.z()) <= p.viewBlocks() + margin) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    private static double zoneCenterBlock(int region) {
-        return region * ZoneKey.regionChunks() * 16.0D + (ZoneKey.regionChunks() * 16.0D) / 2.0D;
+    /** Distance from (px,pz) to the nearest point of the region's block-space AABB. */
+    private static double edgeDistance(ZoneKey key, double px, double pz) {
+        double regionBlocks = ZoneKey.regionChunks() * 16.0D;
+        double minX = key.regionX() * regionBlocks;
+        double maxX = minX + regionBlocks;
+        double minZ = key.regionZ() * regionBlocks;
+        double maxZ = minZ + regionBlocks;
+        double clampedX = Math.max(minX, Math.min(px, maxX));
+        double clampedZ = Math.max(minZ, Math.min(pz, maxZ));
+        return Math.hypot(px - clampedX, pz - clampedZ);
+    }
+
+    record PlayerPos(java.util.UUID world, double x, double z, double viewBlocks) {
     }
 
     static boolean qualifiesForUnload(ZoneState state, MemoryTier heapTier, MemoryTier minDormantUnloadTier) {

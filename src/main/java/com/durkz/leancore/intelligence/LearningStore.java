@@ -23,6 +23,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class LearningStore {
 
@@ -62,6 +63,8 @@ public class LearningStore {
     private long lastHeapDirtyMs;
     private volatile long stateGeneration;
     private volatile long flushedGeneration;
+    // flush() is reachable from the scheduler, disconnect and shutdown threads.
+    private final ReentrantLock flushLock = new ReentrantLock();
 
     public LearningStore(Path dataDir, LeanCoreConfig config) {
         this(dataDir, config, null);
@@ -260,32 +263,40 @@ public class LearningStore {
         if (!force && stateGeneration == flushedGeneration) {
             return;
         }
-        long now = System.currentTimeMillis();
-        lastPrunedCount = prunePlayers(now, retainOnline);
-        pruneZones(now);
-        LearningStateCodec.Snapshot snapshot = buildSnapshot(now);
-
+        flushLock.lock();
         try {
-            Files.createDirectories(dataDir);
-            Path target = dataDir.resolve(LearningStateCodec.GZ_FILE);
-            Path temp = dataDir.resolve(LearningStateCodec.GZ_FILE + ".tmp");
-            try (OutputStream out = Files.newOutputStream(temp)) {
-                LearningStateCodec.writeTo(out, snapshot);
+            if (!force && stateGeneration == flushedGeneration) {
+                return;
             }
-            atomicMove(temp, target);
-            Path legacy = dataDir.resolve(STATE_FILE_LEGACY);
-            Files.deleteIfExists(legacy);
-            lastStateFileBytes = Files.size(target);
-            flushCount++;
-            flushedGeneration = stateGeneration;
-            lastFlushAtMs = now;
-            DiagnosticLog.info(String.format(Locale.ROOT,
-                    "persist: players=%d zones=%d pruned=%d size=%dB (v%d)",
-                    players.size(), zoneReuseModel.size(), lastPrunedCount,
-                    lastStateFileBytes, SCHEMA_VERSION));
-        } catch (IOException ex) {
-            persistFailCount++;
-            warnPersist("learning flush failed", ex);
+            long now = System.currentTimeMillis();
+            lastPrunedCount = prunePlayers(now, retainOnline);
+            pruneZones(now);
+            LearningStateCodec.Snapshot snapshot = buildSnapshot(now);
+
+            try {
+                Files.createDirectories(dataDir);
+                Path target = dataDir.resolve(LearningStateCodec.GZ_FILE);
+                Path temp = dataDir.resolve(LearningStateCodec.GZ_FILE + "." + System.nanoTime() + ".tmp");
+                try (OutputStream out = Files.newOutputStream(temp)) {
+                    LearningStateCodec.writeTo(out, snapshot);
+                }
+                atomicMove(temp, target);
+                Path legacy = dataDir.resolve(STATE_FILE_LEGACY);
+                Files.deleteIfExists(legacy);
+                lastStateFileBytes = Files.size(target);
+                flushCount++;
+                flushedGeneration = stateGeneration;
+                lastFlushAtMs = now;
+                DiagnosticLog.info(String.format(Locale.ROOT,
+                        "persist: players=%d zones=%d pruned=%d size=%dB (v%d)",
+                        players.size(), zoneReuseModel.size(), lastPrunedCount,
+                        lastStateFileBytes, SCHEMA_VERSION));
+            } catch (IOException ex) {
+                persistFailCount++;
+                warnPersist("learning flush failed", ex);
+            }
+        } finally {
+            flushLock.unlock();
         }
     }
 

@@ -240,7 +240,9 @@ public class PolicyApplier {
             byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(playerRef);
         }
 
-        int minDelta = Math.max(1, config.minViewRadiusDelta);
+        // Live boost runs every motion tick; apply even 1-block changes (the periodic policy pass
+        // keeps config.minViewRadiusDelta).
+        int minDelta = 1;
         for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
             World world = Universe.get().getWorld(entry.getKey());
             if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
@@ -278,6 +280,8 @@ public class PolicyApplier {
             base = current;
             viewRadiusCache.noteBaseViewRadius(playerId, base);
         }
+        // Boost off a clamped base so it can exceed a demand/tier-shrunk anchor, up to the max.
+        base = clamp(base, config.minClientViewRadius, config.maxClientViewRadius);
         double motionScale = viewRadiusCache.motionViewScale(
                 playerId, config.motionMinSpeedBlocksPerSecond, config.motionViewRadiusMaxBoost);
         int boosted = applyMotionBoost(base, motionScale, config.maxClientViewRadius);

@@ -9,4 +9,9 @@ import java.util.UUID;
 public interface PredictedPositionSource {
 
     double[] predictedXZ(UUID playerId, long horizonMs);
+
+    /** Effective client view radius in chunks, or non-positive when unknown (caller falls back). */
+    default int viewRadiusChunks(UUID playerId) {
+        return -1;
+    }
 }

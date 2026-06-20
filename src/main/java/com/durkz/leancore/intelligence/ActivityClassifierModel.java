@@ -22,7 +22,7 @@ public class ActivityClassifierModel {
         train(ActivityFeatureEncoder.encodeEvent(kind), kind.teacherIndex());
     }
 
-    public void train(double[] features, int teacherIndex) {
+    public synchronized void train(double[] features, int teacherIndex) {
         if (features == null || features.length != ActivityFeatureEncoder.DIM) {
             return;
         }
@@ -40,12 +40,12 @@ public class ActivityClassifierModel {
         updates++;
     }
 
-    public double[] posterior(PlayerFeatureState state, long nowMs) {
+    public synchronized double[] posterior(PlayerFeatureState state, long nowMs) {
         double[] features = ActivityFeatureEncoder.encodeState(state, nowMs);
         return softmax(features);
     }
 
-    public PlayerBehavior topLabel(PlayerFeatureState state, long nowMs) {
+    public synchronized PlayerBehavior topLabel(PlayerFeatureState state, long nowMs) {
         if (state == null) {
             return PlayerBehavior.UNKNOWN;
         }
@@ -79,15 +79,15 @@ public class ActivityClassifierModel {
         return PlayerBehavior.values()[best];
     }
 
-    public boolean isWarmedUp() {
+    public synchronized boolean isWarmedUp() {
         return updates >= WARMUP_UPDATES;
     }
 
-    public int updates() {
+    public synchronized int updates() {
         return updates;
     }
 
-    public double[][] weights() {
+    public synchronized double[][] weights() {
         double[][] copy = new double[CLASS_COUNT][ActivityFeatureEncoder.DIM];
         for (int c = 0; c < CLASS_COUNT; c++) {
             System.arraycopy(weights[c], 0, copy[c], 0, ActivityFeatureEncoder.DIM);
@@ -95,7 +95,7 @@ public class ActivityClassifierModel {
         return copy;
     }
 
-    public void hydrate(double[][] savedWeights, int savedUpdates) {
+    public synchronized void hydrate(double[][] savedWeights, int savedUpdates) {
         if (savedWeights != null) {
             int rows = Math.min(CLASS_COUNT, savedWeights.length);
             for (int c = 0; c < rows; c++) {
@@ -109,7 +109,7 @@ public class ActivityClassifierModel {
         updates = Math.max(0, savedUpdates);
     }
 
-    public String statusLine(PlayerFeatureState state, long nowMs) {
+    public synchronized String statusLine(PlayerFeatureState state, long nowMs) {
         PlayerBehavior top = topLabel(state, nowMs);
         double[] probs = posterior(state, nowMs);
         double topProb = top.ordinal() < probs.length ? probs[top.ordinal()] : 0.0D;

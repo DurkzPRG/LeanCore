@@ -117,21 +117,21 @@ public class LeanCoreConfig {
     public int liteUnloadIdleSeconds = 180;
     public int liteUnloadMaxChunksPerSweep = 8;
 
-    // v1.6.0 Frente 1: motion model (off by default). Predicted position biases unload away
-    // from zones ahead of the player; optional view-radius boost for fast movers.
-    public boolean motionModelEnabled = false;
+    // v1.6.0 Frente 1: motion model (on by default). Predicted position biases unload away
+    // from zones ahead of the player and protects the cone ahead; view-radius boost for fast movers.
+    public boolean motionModelEnabled = true;
     public int motionPredictionHorizonSeconds = 3;
-    public boolean motionViewRadiusBoostEnabled = false;
-    public double motionViewRadiusMaxBoost = 1.15D;
-    public double motionMinSpeedBlocksPerSecond = 3.0D;
+    public boolean motionViewRadiusBoostEnabled = true;
+    public double motionViewRadiusMaxBoost = 1.6D;
+    public double motionMinSpeedBlocksPerSecond = 2.0D;
     // Fast cadence (seconds) for the live motion sampler + HUD refresh. Must stay under the
     // motion model reset window (5s) so velocity accumulates between samples.
     public int motionSampleIntervalSeconds = 1;
 
-    // v1.6.0 Frente 2: per-zone reuse-distance + survival model (off by default). Biases chunk
+    // v1.6.0 Frente 2: per-zone reuse-distance + survival model (on by default). Biases chunk
     // unload toward zones unlikely to be revisited and scales dormancy thresholds per zone.
     // Persisted across sessions (capped + TTL pruned).
-    public boolean zoneReuseModelEnabled = false;
+    public boolean zoneReuseModelEnabled = true;
     public double zoneReuseRankWeight = 0.5D;
     public double zoneReuseThresholdScaleMin = 0.5D;
     public double zoneReuseThresholdScaleMax = 2.0D;

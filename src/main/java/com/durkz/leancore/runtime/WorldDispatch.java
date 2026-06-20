@@ -1,5 +1,6 @@
 package com.durkz.leancore.runtime;
 
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.hypixel.hytale.server.core.universe.world.World;
 
 import java.util.concurrent.CompletableFuture;
@@ -13,13 +14,18 @@ public final class WorldDispatch {
     private WorldDispatch() {
     }
 
-    public static void run(World world, Runnable task) {
+    /**
+     * Runs {@code task} on the world thread, blocking up to {@link #TIMEOUT_SEC}. Returns true only if
+     * it completed in time. A timed-out task is not cancelled and may still run, so do not trust state
+     * it mutates unless this returned true.
+     */
+    public static boolean run(World world, Runnable task) {
         if (world == null || !world.isAlive() || task == null || !RuntimeGuard.active()) {
-            return;
+            return false;
         }
         if (shouldRunInline(world)) {
             task.run();
-            return;
+            return true;
         }
         CompletableFuture<Void> done = new CompletableFuture<>();
         try {
@@ -33,13 +39,20 @@ public final class WorldDispatch {
                 }
             });
         } catch (RuntimeException ignored) {
-            return;
+            return false;
         }
         try {
             done.get(TIMEOUT_SEC, TimeUnit.SECONDS);
-        } catch (TimeoutException ignored) {
-            done.complete(null);
+            return true;
+        } catch (TimeoutException timeout) {
+            DiagnosticLog.infoOnChange("worlddispatch-timeout",
+                    "world task exceeded " + TIMEOUT_SEC + "s; its result is skipped this tick");
+            return false;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
         } catch (Exception ignored) {
+            return false;
         }
     }
 

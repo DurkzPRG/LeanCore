@@ -70,6 +70,12 @@ public class PlayerFeatureTracker implements ViewRadiusCache, PredictedPositionS
     }
 
     @Override
+    public int viewRadiusChunks(UUID playerId) {
+        PlayerFeatureState state = states.get(playerId);
+        return state == null ? -1 : state.effectiveViewRadius();
+    }
+
+    @Override
     public double motionViewScale(UUID playerId, double minSpeedBlocksPerSec, double maxBoost) {
         PlayerFeatureState state = states.get(playerId);
         return state == null ? 1.0D : state.motionViewScale(minSpeedBlocksPerSec, maxBoost);

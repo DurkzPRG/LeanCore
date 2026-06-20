@@ -218,8 +218,14 @@ final class LearningStateCodec {
     }
 
     private static void writeBandit(DataOutputStream out, Map<String, BanditArm> arms) throws IOException {
-        out.writeShort(arms.size());
+        int count = Math.min(arms.size(), MAX_COLLECTION_ENTRIES);
+        out.writeShort(count);
+        int written = 0;
         for (Map.Entry<String, BanditArm> e : arms.entrySet()) {
+            if (written >= count) {
+                break;
+            }
+            written++;
             byte[] key = e.getKey().getBytes(StandardCharsets.UTF_8);
             out.writeShort(key.length);
             out.write(key);
@@ -257,8 +263,14 @@ final class LearningStateCodec {
     }
 
     private static void writeBlacklist(DataOutputStream out, Map<String, Long> entries) throws IOException {
-        out.writeShort(entries.size());
+        int count = Math.min(entries.size(), MAX_COLLECTION_ENTRIES);
+        out.writeShort(count);
+        int written = 0;
         for (Map.Entry<String, Long> e : entries.entrySet()) {
+            if (written >= count) {
+                break;
+            }
+            written++;
             byte[] key = e.getKey().getBytes(StandardCharsets.UTF_8);
             out.writeShort(key.length);
             out.write(key);
@@ -279,8 +291,14 @@ final class LearningStateCodec {
     }
 
     private static void writePlayers(DataOutputStream out, Map<UUID, PlayerRecord> players) throws IOException {
-        out.writeInt(players.size());
+        int count = Math.min(players.size(), MAX_PLAYER_ENTRIES);
+        out.writeInt(count);
+        int written = 0;
         for (Map.Entry<UUID, PlayerRecord> e : players.entrySet()) {
+            if (written >= count) {
+                break;
+            }
+            written++;
             UUID id = e.getKey();
             out.writeLong(id.getMostSignificantBits());
             out.writeLong(id.getLeastSignificantBits());

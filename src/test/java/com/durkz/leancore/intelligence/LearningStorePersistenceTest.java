@@ -106,13 +106,58 @@ class LearningStorePersistenceTest {
     @Test
     void flushFailureSurfacesInStatusLine() throws Exception {
         LeanCoreConfig config = configWithLearning();
-        Files.createDirectories(dataDir.resolve(LearningStateCodec.GZ_FILE + ".tmp"));
+        // Temp names are now unique, so force failure by making the target a non-empty directory.
+        Path target = dataDir.resolve(LearningStateCodec.GZ_FILE);
+        Files.createDirectories(target);
+        Files.createFile(target.resolve("blocker"));
         LearningStore store = new LearningStore(dataDir, config, (message, cause) -> { });
         store.markDirty();
         store.flush(true, java.util.Set.of());
 
         assertTrue(store.statusLine().contains("flushErr=1"));
         assertTrue(store.statusLine().contains("lastFlush=never"));
+    }
+
+    @Test
+    void concurrentFlushesProduceReadableState() throws Exception {
+        LeanCoreConfig config = configWithLearning();
+        LearningStore store = new LearningStore(dataDir, config);
+        UUID playerId = UUID.randomUUID();
+        store.savePlayerFeatures(new PlayerFeatureState(playerId));
+        store.noteDemands(Map.of(playerId, RetentionDemand.coldStart(PlayerBehavior.MINER)));
+
+        int threads = 6;
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+        for (int i = 0; i < threads; i++) {
+            futures.add(pool.submit(() -> {
+                try {
+                    start.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                for (int j = 0; j < 25; j++) {
+                    store.markDirty();
+                    store.flush(true, java.util.Set.of(playerId));
+                }
+            }));
+        }
+        start.countDown();
+        for (var f : futures) {
+            f.get();
+        }
+        pool.shutdownNow();
+
+        LearningStore reloaded = new LearningStore(dataDir, config);
+        assertEquals(PlayerBehavior.MINER, reloaded.demandFor(playerId).debugLabel());
+        assertTrue(reloaded.statusLine().contains("flushErr=0"));
+
+        try (var entries = Files.list(dataDir)) {
+            assertFalse(entries.anyMatch(p -> p.getFileName().toString().endsWith(".tmp")),
+                    "no stale temp files should remain after concurrent flushes");
+        }
     }
 
     @Test

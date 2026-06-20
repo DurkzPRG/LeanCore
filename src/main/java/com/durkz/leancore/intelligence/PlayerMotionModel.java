@@ -7,14 +7,21 @@ package com.durkz.leancore.intelligence;
  */
 public final class PlayerMotionModel {
 
-    private static final double VELOCITY_HALF_LIFE_MS = 2_000.0D;
+    private static final double VELOCITY_HALF_LIFE_MS = 700.0D;
+    private static final double ACCEL_HALF_LIFE_MS = 1_200.0D;
     private static final double MIN_DT_MS = 1.0D;
     private static final long MAX_SANE_DT_MS = 5_000L;
     private static final double MAX_SANE_SPEED = 60.0D;
-    private static final double WARMUP_MS = 4_000.0D;
+    private static final double MAX_SANE_ACCEL = 40.0D;
+    private static final double WARMUP_MS = 1_500.0D;
+    // Full boost is reached at (1 + RAMP_SPAN) * minSpeed.
+    private static final double RAMP_SPAN = 2.0D;
+    private static final double BOOST_CONFIDENCE_FLOOR = 0.5D;
 
     private double vx;
     private double vz;
+    private double ax;
+    private double az;
     private double lastX;
     private double lastZ;
     private long lastSampleMs;
@@ -44,8 +51,16 @@ public final class PlayerMotionModel {
             return;
         }
         double blend = 1.0D - Math.exp(-Math.log(2.0D) * dtMs / VELOCITY_HALF_LIFE_MS);
+        double prevVx = vx;
+        double prevVz = vz;
         vx = vx * (1.0D - blend) + instVx * blend;
         vz = vz * (1.0D - blend) + instVz * blend;
+
+        double accelBlend = 1.0D - Math.exp(-Math.log(2.0D) * dtMs / ACCEL_HALF_LIFE_MS);
+        double instAx = (vx - prevVx) / dt;
+        double instAz = (vz - prevVz) / dt;
+        ax = ax * (1.0D - accelBlend) + instAx * accelBlend;
+        az = az * (1.0D - accelBlend) + instAz * accelBlend;
 
         double speedDelta = instSpeed - Math.hypot(vx, vz);
         speedVarianceEma = speedVarianceEma * (1.0D - blend) + speedDelta * speedDelta * blend;
@@ -59,6 +74,8 @@ public final class PlayerMotionModel {
     private void reset(double x, double z, long nowMs) {
         vx = 0.0D;
         vz = 0.0D;
+        ax = 0.0D;
+        az = 0.0D;
         lastX = x;
         lastZ = z;
         lastSampleMs = nowMs;
@@ -87,19 +104,34 @@ public final class PlayerMotionModel {
         return FeatureNormalizer.clamp01(timeFactor * steadiness);
     }
 
-    /** Predicted (x,z) horizonMs ahead, damped by confidence. Null until the first sample lands. */
+    /** Predicted (x,z) horizonMs ahead via {@code p + v*t + 0.5*a*t^2} (accel clamped), damped by
+     * confidence. Null until the first sample lands. */
     public double[] predictedXZ(long horizonMs) {
         if (!positioned) {
             return null;
         }
         double horizon = Math.max(0L, horizonMs) / 1000.0D;
         double k = confidence();
-        return new double[]{lastX + vx * horizon * k, lastZ + vz * horizon * k};
+        double cax = clampAccel(ax);
+        double caz = clampAccel(az);
+        double dx = (vx * horizon + 0.5D * cax * horizon * horizon) * k;
+        double dz = (vz * horizon + 0.5D * caz * horizon * horizon) * k;
+        return new double[]{lastX + dx, lastZ + dz};
+    }
+
+    private static double clampAccel(double a) {
+        if (a > MAX_SANE_ACCEL) {
+            return MAX_SANE_ACCEL;
+        }
+        if (a < -MAX_SANE_ACCEL) {
+            return -MAX_SANE_ACCEL;
+        }
+        return a;
     }
 
     /**
-     * View-radius multiplier in [1.0, maxBoost]. 1.0 below {@code minSpeedBlocksPerSec}; ramps up
-     * with speed (saturating around twice the threshold) and is damped by confidence. Upward only.
+     * Upward-only view-radius multiplier in [1.0, maxBoost], ramping with speed above the threshold.
+     * Damped by warmup (not by velocity steadiness) so accelerating does not suppress the boost.
      */
     public double viewScale(double minSpeedBlocksPerSec, double maxBoost) {
         double cap = Math.max(1.0D, maxBoost);
@@ -111,7 +143,15 @@ public final class PlayerMotionModel {
         if (speed <= minSpeed) {
             return 1.0D;
         }
-        double ramp = FeatureNormalizer.clamp01((speed - minSpeed) / minSpeed);
-        return 1.0D + (cap - 1.0D) * ramp * confidence();
+        double ramp = FeatureNormalizer.clamp01((speed - minSpeed) / (minSpeed * RAMP_SPAN));
+        return 1.0D + (cap - 1.0D) * ramp * boostConfidence();
+    }
+
+    private double boostConfidence() {
+        if (!positioned) {
+            return 0.0D;
+        }
+        double timeFactor = Math.min(1.0D, observedMs / WARMUP_MS);
+        return FeatureNormalizer.clamp01(Math.max(BOOST_CONFIDENCE_FLOOR, timeFactor));
     }
 }

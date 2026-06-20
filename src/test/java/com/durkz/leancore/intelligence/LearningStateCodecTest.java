@@ -55,6 +55,22 @@ class LearningStateCodecTest {
         assertTrue(decoded.zones().isEmpty(), "v7 payload yields empty zones");
     }
 
+    @Test
+    void writeCapsBlacklistToReadLimitSoFileStaysReadable() throws Exception {
+        // 600 > MAX_COLLECTION_ENTRIES (512): the writer must cap so the reader can load it back.
+        LinkedHashMap<String, Long> big = new LinkedHashMap<>();
+        for (int i = 0; i < 600; i++) {
+            big.put("policy-" + i, (long) i);
+        }
+        LearningStateCodec.Snapshot snapshot = snapshotWithBlacklist(big);
+
+        LearningStateCodec.Snapshot decoded = LearningStateCodec.decode(LearningStateCodec.encode(snapshot));
+
+        assertTrue(decoded.blacklist().size() <= 512,
+                "blacklist must be capped to the read limit, was " + decoded.blacklist().size());
+        assertTrue(decoded.blacklist().size() > 0, "some blacklist entries should survive the round trip");
+    }
+
     private static LearningStateCodec.Snapshot emptySnapshot(List<ZoneReuseModel.Record> zones) {
         return new LearningStateCodec.Snapshot(
                 1L, MemoryTier.COMFORT, 0.0D,
@@ -67,6 +83,21 @@ class LearningStateCodecTest {
                 new LinkedHashMap<>(),
                 new LinkedHashMap<>(),
                 zones
+        );
+    }
+
+    private static LearningStateCodec.Snapshot snapshotWithBlacklist(LinkedHashMap<String, Long> blacklist) {
+        return new LearningStateCodec.Snapshot(
+                1L, MemoryTier.COMFORT, 0.0D,
+                0, 0, 0, 0, 0, 0, 0,
+                0.0D, 0.0D, 0.0D,
+                0.0D, 0.0D, 0.0D, 0.0D, 0,
+                new double[FeatureSchema.DEMAND_DIM],
+                new double[PlayerBehavior.values().length][ActivityFeatureEncoder.DIM],
+                new LinkedHashMap<>(),
+                blacklist,
+                new LinkedHashMap<>(),
+                List.of()
         );
     }
 

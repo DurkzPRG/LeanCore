@@ -68,7 +68,7 @@ public class PlayerFeatureState {
         return playerId;
     }
 
-    public void hydrate(
+    public synchronized void hydrate(
             double movement60,
             double breaks60,
             double places60,
@@ -126,7 +126,7 @@ public class PlayerFeatureState {
         onBlockPlaced(BlockActionContext.unknown());
     }
 
-    private void onActivity(ActionKind kind, boolean broken, boolean placed) {
+    private synchronized void onActivity(ActionKind kind, boolean broken, boolean placed) {
         long nowMs = System.currentTimeMillis();
         tick(nowMs);
         if (broken) {
@@ -179,7 +179,7 @@ public class PlayerFeatureState {
         lastActivityMs = nowMs;
     }
 
-    public PlayerBehavior recentDominantBehavior() {
+    public synchronized PlayerBehavior recentDominantBehavior() {
         PlayerBehavior recent = recentActivity.dominantBehavior(4, 0.55D);
         return recent == null ? PlayerBehavior.UNKNOWN : recent;
     }
@@ -203,6 +203,11 @@ public class PlayerFeatureState {
         return cachedViewRadius;
     }
 
+    /** Largest known view radius in chunks (cached reading or last motion-applied). */
+    public int effectiveViewRadius() {
+        return Math.max(0, Math.max(cachedViewRadius, lastAppliedViewRadius));
+    }
+
     public int lastRawLoaded() {
         return lastRawLoaded;
     }
@@ -211,7 +216,7 @@ public class PlayerFeatureState {
         lastRawLoaded = Math.max(0, loaded);
     }
 
-    public void sampleSpatial(double chunkPressure) {
+    public synchronized void sampleSpatial(double chunkPressure) {
         if (chunkPressure <= 0.0D) {
             return;
         }
@@ -220,7 +225,7 @@ public class PlayerFeatureState {
         emaChunks15m = emaChunks15m * (1.0D - CHUNK_BLEND_15M) + capped * CHUNK_BLEND_15M;
     }
 
-    public void samplePosition(double x, double z) {
+    public synchronized void samplePosition(double x, double z) {
         long nowMs = System.currentTimeMillis();
         tick(nowMs);
         motion.update(x, z, nowMs);
@@ -242,19 +247,19 @@ public class PlayerFeatureState {
         positioned = true;
     }
 
-    public double[] predictedXZ(long horizonMs) {
+    public synchronized double[] predictedXZ(long horizonMs) {
         return motion.predictedXZ(horizonMs);
     }
 
-    public double speedBlocksPerSec() {
+    public synchronized double speedBlocksPerSec() {
         return motion.speedBlocksPerSec();
     }
 
-    public double motionConfidence() {
+    public synchronized double motionConfidence() {
         return motion.confidence();
     }
 
-    public double motionViewScale(double minSpeedBlocksPerSec, double maxBoost) {
+    public synchronized double motionViewScale(double minSpeedBlocksPerSec, double maxBoost) {
         return motion.viewScale(minSpeedBlocksPerSec, maxBoost);
     }
 
@@ -283,7 +288,7 @@ public class PlayerFeatureState {
         emaCombat60 *= 0.72D;
     }
 
-    public void tick(long nowMs) {
+    public synchronized void tick(long nowMs) {
         if (lastTickMs <= 0L) {
             lastTickMs = nowMs;
             return;
@@ -313,7 +318,7 @@ public class PlayerFeatureState {
         lastTickMs = nowMs;
     }
 
-    public double activityIndex() {
+    public synchronized double activityIndex() {
         double shortTerm = emaMovement60 * 0.04D
                 + emaBreaks60 * 2.0D
                 + emaPlaces60 * 2.5D
@@ -337,7 +342,7 @@ public class PlayerFeatureState {
         return Math.max(0L, (nowMs - lastActivityMs) / 1000L);
     }
 
-    public double confidence() {
+    public synchronized double confidence() {
         double timeFactor = Math.min(1.0D, observedMs / 600_000D);
         double stability = featureStability();
         return Math.min(1.0D, timeFactor * (0.45D + 0.55D * stability));

@@ -73,15 +73,61 @@ class ZoneDormancyMapTest {
         ZoneKey behind = new ZoneKey(WORLD, -2, 0);
 
         // Player at origin: the zone behind is physically closer than the zone ahead.
-        List<ZoneDormancyMap.PlayerPos> current = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D));
+        List<ZoneDormancyMap.PlayerPos> current = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D, 0.0D));
         assertTrue(ZoneDormancyMap.minDistanceToPlayers(behind, current)
                 < ZoneDormancyMap.minDistanceToPlayers(ahead, current));
 
         // With the predicted position shifted forward (+x), the zone behind becomes the farthest,
         // so it ranks first for unload while the zone ahead is protected.
-        List<ZoneDormancyMap.PlayerPos> predicted = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 200.0D, 0.0D));
+        List<ZoneDormancyMap.PlayerPos> predicted = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 200.0D, 0.0D, 0.0D));
         assertTrue(ZoneDormancyMap.minDistanceToPlayers(behind, predicted)
                 > ZoneDormancyMap.minDistanceToPlayers(ahead, predicted));
+    }
+
+    @Test
+    void distanceMeasuredToNearestChunkNotCenter() {
+        ZoneKey zone = new ZoneKey(WORLD, 0, 0);
+
+        List<ZoneDormancyMap.PlayerPos> inside =
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 8.0D, 8.0D, 0.0D));
+        assertEquals(0.0D, ZoneDormancyMap.minDistanceToPlayers(zone, inside), 1e-9);
+
+        double edge = ZoneKey.regionChunks() * 16.0D;
+        List<ZoneDormancyMap.PlayerPos> outside =
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, edge + 40.0D, 8.0D, 0.0D));
+        assertEquals(40.0D, ZoneDormancyMap.minDistanceToPlayers(zone, outside), 1e-9);
+    }
+
+    @Test
+    void protectedRadiusExcludesZonesInsideViewDistance() {
+        ZoneKey near = new ZoneKey(WORLD, 2, 0);
+        ZoneKey far = new ZoneKey(WORLD, 8, 0);
+
+        // near edge is 128 blocks out; protect radius is 100 + 64 slack = 164.
+        List<ZoneDormancyMap.PlayerPos> players =
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D, 100.0D));
+        assertTrue(ZoneDormancyMap.isProtectedByView(near, players));
+        assertFalse(ZoneDormancyMap.isProtectedByView(far, players));
+    }
+
+    @Test
+    void protectedRadiusFollowsPredictedPositionAhead() {
+        ZoneKey ahead = new ZoneKey(WORLD, 8, 0);
+
+        // Second entry is the predicted point, next to the ahead zone.
+        List<ZoneDormancyMap.PlayerPos> players = List.of(
+                new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D, 32.0D),
+                new ZoneDormancyMap.PlayerPos(WORLD, 8 * ZoneKey.regionChunks() * 16.0D, 0.0D, 32.0D));
+        assertTrue(ZoneDormancyMap.isProtectedByView(ahead, players));
+    }
+
+    @Test
+    void protectedRadiusIgnoresOtherWorldPlayers() {
+        UUID worldB = UUID.randomUUID();
+        ZoneKey zoneInA = new ZoneKey(WORLD, 0, 0);
+        List<ZoneDormancyMap.PlayerPos> otherWorld =
+                List.of(new ZoneDormancyMap.PlayerPos(worldB, 0.0D, 0.0D, 1000.0D));
+        assertFalse(ZoneDormancyMap.isProtectedByView(zoneInA, otherWorld));
     }
 
     @Test
@@ -91,12 +137,12 @@ class ZoneDormancyMapTest {
 
         // Player sitting on the zone center but in a different world must not protect it.
         List<ZoneDormancyMap.PlayerPos> otherWorld =
-                List.of(new ZoneDormancyMap.PlayerPos(worldB, 0.0D, 0.0D));
+                List.of(new ZoneDormancyMap.PlayerPos(worldB, 0.0D, 0.0D, 0.0D));
         assertEquals(Double.MAX_VALUE, ZoneDormancyMap.minDistanceToPlayers(zoneInA, otherWorld));
 
         // Same coords, same world -> finite distance (protected).
         List<ZoneDormancyMap.PlayerPos> sameWorld =
-                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D));
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D, 0.0D));
         assertTrue(ZoneDormancyMap.minDistanceToPlayers(zoneInA, sameWorld) < Double.MAX_VALUE);
     }
 
@@ -112,7 +158,7 @@ class ZoneDormancyMapTest {
 
         // Only WORLD has a player online; emptyWorld has nobody.
         List<ZoneDormancyMap.PlayerPos> players =
-                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 160.0D, 0.0D));
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 160.0D, 0.0D, 0.0D));
 
         assertTrue(map.evictionPriority(emptyWorldZone, players, 1_000L)
                         > map.evictionPriority(occupiedWorldZone, players, 1_000L),
@@ -136,7 +182,7 @@ class ZoneDormancyMapTest {
         long evalTime = t - 30_000L;
         model.noteHot(rareNear, evalTime);
 
-        List<ZoneDormancyMap.PlayerPos> players = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D));
+        List<ZoneDormancyMap.PlayerPos> players = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D, 0.0D));
 
         config.zoneReuseModelEnabled = false;
         assertTrue(map.evictionPriority(frequentFar, players, evalTime)
@@ -144,7 +190,8 @@ class ZoneDormancyMapTest {
                 "with reuse off, the farther zone evicts first");
 
         config.zoneReuseModelEnabled = true;
-        config.zoneReuseRankWeight = 0.5D;
+        // Adjacent zones sit close under edge distance, so weight the reuse term enough to flip ranking.
+        config.zoneReuseRankWeight = 2.0D;
         assertTrue(map.evictionPriority(rareNear, players, evalTime)
                         > map.evictionPriority(frequentFar, players, evalTime),
                 "with reuse on, the frequently revisited far zone is protected");

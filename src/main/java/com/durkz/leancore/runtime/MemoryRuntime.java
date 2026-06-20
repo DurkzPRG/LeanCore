@@ -37,13 +37,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 public class MemoryRuntime {
+
+    // Caps how long the sequential per-world fan-out may block the scheduler in one tick. Only trips
+    // when worlds stall; once over, we stop dispatching the remaining worlds this tick.
+    private static final long FAN_OUT_BUDGET_NANOS = 2_000L * 1_000_000L;
 
     private final LeanCorePlugin plugin;
     private final LeanCoreConfig config;
@@ -70,11 +73,10 @@ public class MemoryRuntime {
     private volatile boolean running;
     private volatile boolean shutdownDone;
     private ScheduledExecutorService scheduler;
+    private ScheduledExecutorService persistScheduler;
     private ScheduledFuture<?> tickFuture;
     private ScheduledFuture<?> persistFuture;
     private ScheduledFuture<?> motionFuture;
-    private final AtomicBoolean governorWorldTickPending = new AtomicBoolean(false);
-    private final AtomicBoolean motionTickPending = new AtomicBoolean(false);
     private long lastDormancyRefreshMs;
     private long lastLiteHeapSampleMs;
     private double lastLiteX;
@@ -154,7 +156,8 @@ public class MemoryRuntime {
     public void start() {
         shutdown();
         shutdownDone = false;
-        scheduler = newScheduler();
+        scheduler = newScheduler("LeanCore-runtime");
+        persistScheduler = newScheduler("LeanCore-persist");
         running = true;
         liteSessionStartedMs = System.currentTimeMillis();
         chunkSaturationSampler = new ChunkSaturationSampler(() -> Universe.get().getPlayers());
@@ -255,7 +258,6 @@ public class MemoryRuntime {
         }
         shutdownDone = true;
         running = false;
-        governorWorldTickPending.set(false);
         if (tickFuture != null) {
             tickFuture.cancel(true);
             tickFuture = null;
@@ -268,7 +270,6 @@ public class MemoryRuntime {
             motionFuture.cancel(true);
             motionFuture = null;
         }
-        motionTickPending.set(false);
         stopScheduler();
         persistLearning();
         logShutdownDiagnostics();
@@ -282,15 +283,17 @@ public class MemoryRuntime {
         plugin.getLogger().atInfo().log("Runtime stopped (daemon scheduler shut down)");
     }
 
-    private static ScheduledExecutorService newScheduler() {
+    private static ScheduledExecutorService newScheduler(String threadName) {
         return Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread thread = new Thread(r, "LeanCore-runtime");
+            Thread thread = new Thread(r, threadName);
             thread.setDaemon(true);
             return thread;
         });
     }
 
     private void stopScheduler() {
+        stopExecutor(persistScheduler);
+        persistScheduler = null;
         ScheduledExecutorService active = scheduler;
         scheduler = null;
         if (active == null) {
@@ -299,6 +302,18 @@ public class MemoryRuntime {
         active.shutdownNow();
         try {
             active.awaitTermination(2L, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void stopExecutor(ScheduledExecutorService executor) {
+        if (executor == null) {
+            return;
+        }
+        executor.shutdownNow();
+        try {
+            executor.awaitTermination(2L, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -316,10 +331,10 @@ public class MemoryRuntime {
     }
 
     private void schedulePersistIfNeeded() {
-        if (!running || scheduler == null || !learningStore.persistenceEnabled() || config.persistIntervalSeconds <= 0) {
+        if (!running || persistScheduler == null || !learningStore.persistenceEnabled() || config.persistIntervalSeconds <= 0) {
             return;
         }
-        persistFuture = scheduler.scheduleAtFixedRate(() -> {
+        persistFuture = persistScheduler.scheduleAtFixedRate(() -> {
             if (!running) {
                 return;
             }
@@ -354,9 +369,6 @@ public class MemoryRuntime {
         if (online.isEmpty()) {
             return;
         }
-        if (!motionTickPending.compareAndSet(false, true)) {
-            return;
-        }
         long nowMs = System.currentTimeMillis();
         try {
             List<WorldBatch> batches = resolveAliveWorldBatches(online);
@@ -374,8 +386,6 @@ public class MemoryRuntime {
             }
         } catch (Exception e) {
             plugin.getLogger().atWarning().withCause(e).log("motion tick failed");
-        } finally {
-            motionTickPending.set(false);
         }
     }
 
@@ -474,15 +484,10 @@ public class MemoryRuntime {
             return;
         }
 
-        if (!governorWorldTickPending.compareAndSet(false, true)) {
-            return;
-        }
         try {
             tickGovernorOnWorld(governorProfile, online, nowMs, batches);
         } catch (Exception e) {
             plugin.getLogger().atWarning().withCause(e).log("governor tick failed");
-        } finally {
-            governorWorldTickPending.set(false);
         }
     }
 
@@ -589,7 +594,13 @@ public class MemoryRuntime {
 
     /** Samples player motion on each world's own thread (transform reads need world affinity). */
     private void samplePositionsPerWorld(List<WorldBatch> batches, long nowMs, boolean fullProbe) {
+        long deadlineNs = System.nanoTime() + FAN_OUT_BUDGET_NANOS;
         for (WorldBatch batch : batches) {
+            if (System.nanoTime() > deadlineNs) {
+                DiagnosticLog.infoOnChange("fanout-budget",
+                        "fan-out budget exceeded; motion sample ran on a subset of worlds this tick");
+                break;
+            }
             WorldDispatch.run(batch.world(), () -> {
                 GovernorWorldContext.enter(batch.worldUuid());
                 try {
@@ -606,23 +617,39 @@ public class MemoryRuntime {
     }
 
     /**
-     * Collects hot zones per world (each on its world thread, reading transforms) and then runs
-     * the pure dormancy state machine once. {@code WorldDispatch.run} blocks, so the per-world
-     * gathers complete before the aggregated refresh runs.
+     * Gathers hot zones per world on each world thread, then runs the dormancy state machine once.
+     * Each world fills a local buffer and only merges on a successful run, so a timed-out task can
+     * never race the aggregate. If any world is missed we skip the refresh rather than age its zones.
      */
     private void refreshDormancyPerWorld(List<WorldBatch> batches, long nowMs) {
         List<ZoneKey> hot = new ArrayList<>();
+        boolean complete = true;
+        long deadlineNs = System.nanoTime() + FAN_OUT_BUDGET_NANOS;
         for (WorldBatch batch : batches) {
-            WorldDispatch.run(batch.world(), () -> {
+            if (System.nanoTime() > deadlineNs) {
+                DiagnosticLog.infoOnChange("fanout-budget",
+                        "fan-out budget exceeded; dormancy refresh deferred (partial worlds)");
+                complete = false;
+                break;
+            }
+            List<ZoneKey> local = new ArrayList<>();
+            boolean done = WorldDispatch.run(batch.world(), () -> {
                 GovernorWorldContext.enter(batch.worldUuid());
                 try {
-                    hot.addAll(ZoneDormancyMap.hotZonesForPlayers(batch.players()));
+                    local.addAll(ZoneDormancyMap.hotZonesForPlayers(batch.players()));
                 } finally {
                     GovernorWorldContext.exit();
                 }
             });
+            if (done) {
+                hot.addAll(local);
+            } else {
+                complete = false;
+            }
         }
-        dormancyMap.refreshFromHotZones(hot, nowMs);
+        if (complete) {
+            dormancyMap.refreshFromHotZones(hot, nowMs);
+        }
     }
 
     private record WorldBatch(UUID worldUuid, World world, List<PlayerRef> players) {
@@ -633,15 +660,10 @@ public class MemoryRuntime {
         if (batches.isEmpty()) {
             return;
         }
-        if (!governorWorldTickPending.compareAndSet(false, true)) {
-            return;
-        }
         try {
             tickLiteOnWorld(online, nowMs, batches);
         } catch (Exception e) {
             plugin.getLogger().atWarning().withCause(e).log("lite tick failed");
-        } finally {
-            governorWorldTickPending.set(false);
         }
     }
 
