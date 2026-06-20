@@ -1,11 +1,13 @@
 package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 
 public class ServerContextTracker {
 
@@ -50,20 +52,25 @@ public class ServerContextTracker {
         if (samples.size() < MIN_SAMPLES) {
             return resolveFixed(heapRatio);
         }
-        MemoryTier next;
+        MemoryTier prev = lastTier;
+        MemoryTier raw;
         if (heapRatio >= q97) {
-            next = MemoryTier.CRITICAL;
+            raw = MemoryTier.CRITICAL;
         } else if (heapRatio >= q90) {
-            next = MemoryTier.TIGHT;
+            raw = MemoryTier.TIGHT;
         } else if (heapRatio >= q75) {
-            next = MemoryTier.WATCH;
+            raw = MemoryTier.WATCH;
         } else {
-            next = MemoryTier.COMFORT;
+            raw = MemoryTier.COMFORT;
         }
-        if (next.ordinal() < lastTier.ordinal()) {
-            next = MemoryTier.values()[lastTier.ordinal() - 1];
+        MemoryTier next = raw;
+        boolean hysteresis = false;
+        if (next.ordinal() < prev.ordinal()) {
+            next = MemoryTier.values()[prev.ordinal() - 1];
+            hysteresis = next != raw;
         }
         lastTier = next;
+        logTierChange(prev, next, heapRatio, true, hysteresis);
         return next;
     }
 
@@ -103,21 +110,42 @@ public class ServerContextTracker {
     }
 
     private MemoryTier resolveFixed(double heapRatio) {
-        MemoryTier next;
+        MemoryTier prev = lastTier;
+        MemoryTier raw;
         if (heapRatio >= config.criticalHeapRatio) {
-            next = MemoryTier.CRITICAL;
+            raw = MemoryTier.CRITICAL;
         } else if (heapRatio >= config.tightHeapRatio) {
-            next = MemoryTier.TIGHT;
+            raw = MemoryTier.TIGHT;
         } else if (heapRatio >= config.watchHeapRatio) {
-            next = MemoryTier.WATCH;
+            raw = MemoryTier.WATCH;
         } else {
-            next = MemoryTier.COMFORT;
+            raw = MemoryTier.COMFORT;
         }
-        if (next.ordinal() < lastTier.ordinal()) {
-            next = MemoryTier.values()[lastTier.ordinal() - 1];
+        MemoryTier next = raw;
+        boolean hysteresis = false;
+        if (next.ordinal() < prev.ordinal()) {
+            next = MemoryTier.values()[prev.ordinal() - 1];
+            hysteresis = next != raw;
         }
         lastTier = next;
+        logTierChange(prev, next, heapRatio, false, hysteresis);
         return next;
+    }
+
+    private void logTierChange(MemoryTier prev, MemoryTier next, double heapRatio,
+                               boolean adaptive, boolean hysteresis) {
+        if (next == prev) {
+            return;
+        }
+        String bounds = adaptive
+                ? String.format(Locale.ROOT, "q75=%.0f%% q90=%.0f%% q97=%.0f%%",
+                        q75 * 100.0D, q90 * 100.0D, q97 * 100.0D)
+                : String.format(Locale.ROOT, "watch=%.0f%% tight=%.0f%% crit=%.0f%%",
+                        config.watchHeapRatio * 100.0D, config.tightHeapRatio * 100.0D,
+                        config.criticalHeapRatio * 100.0D);
+        DiagnosticLog.info(String.format(Locale.ROOT, "tier %s->%s heap=%.0f%% [%s]%s",
+                prev, next, heapRatio * 100.0D, bounds,
+                hysteresis ? " (hysteresis: 1-step downgrade)" : ""));
     }
 
     private void recomputeQuantiles() {

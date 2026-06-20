@@ -47,29 +47,45 @@ public class ZoneDormancyMap {
         Set<ZoneKey> hotNow = new HashSet<>(hotZones);
         ZoneReuseModel reuse = this.reuseModel;
         boolean reuseEnabled = config.zoneReuseModelEnabled && reuse != null;
+        List<String> changes = new ArrayList<>();
+
         for (ZoneKey key : hotNow) {
-            if (reuseEnabled && zones.get(key) != ZoneState.HOT) {
+            ZoneState prev = zones.get(key);
+            if (reuseEnabled && prev != ZoneState.HOT) {
                 reuse.noteHot(key, now);
             }
             zones.put(key, ZoneState.HOT);
             lastHotAtMs.put(key, now);
+            if (prev != ZoneState.HOT) {
+                String why = reuseEnabled && reuse.visitCount(key) > 1 ? "revisit" : "player entered";
+                changes.add((prev == null ? "NEW" : prev.name()) + "->HOT " + key + " " + why);
+            }
         }
 
-        List<String> demotions = null;
         for (Map.Entry<ZoneKey, Long> entry : lastHotAtMs.entrySet()) {
             ZoneKey key = entry.getKey();
             if (hotNow.contains(key) || pinned.contains(key)) {
                 continue;
             }
             long idleMin = (now - entry.getValue()) / 60_000L;
+            double scale = reuseEnabled
+                    ? reuse.thresholdScale(key, config.zoneReuseThresholdScaleMin, config.zoneReuseThresholdScaleMax)
+                    : 1.0D;
+            long dormantMin = Math.round(config.dormantAfterMinutes * scale);
+            long frozenMin = Math.round(config.frozenAfterMinutes * scale);
             ZoneState prev = zones.get(key);
-            ZoneState next = stateForZone(key, idleMin);
+            ZoneState next;
+            if (idleMin >= frozenMin) {
+                next = ZoneState.FROZEN;
+            } else if (idleMin >= dormantMin) {
+                next = ZoneState.DORMANT;
+            } else {
+                next = ZoneState.WARM;
+            }
             zones.put(key, next);
-            if (next != prev && (next == ZoneState.DORMANT || next == ZoneState.FROZEN)) {
-                if (demotions == null) {
-                    demotions = new ArrayList<>();
-                }
-                demotions.add((prev == null ? "NEW" : prev.name()) + "->" + next.name() + " " + key);
+            if (next != prev) {
+                changes.add(transitionReason(key, prev, next, idleMin, scale,
+                        dormantMin, frozenMin, reuseEnabled, reuse, now));
             }
         }
 
@@ -79,23 +95,39 @@ public class ZoneDormancyMap {
         }
 
         pruneStaleZones(now);
-        logDemotions(demotions);
+        logTransitions(changes);
     }
 
-    private void logDemotions(List<String> demotions) {
-        if (demotions == null || demotions.isEmpty()) {
+    private String transitionReason(ZoneKey key, ZoneState prev, ZoneState next, long idleMin,
+                                    double scale, long dormantMin, long frozenMin,
+                                    boolean reuseEnabled, ZoneReuseModel reuse, long now) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(prev == null ? "NEW" : prev.name()).append("->").append(next.name())
+                .append(' ').append(key).append(" idle=").append(idleMin).append('m');
+        if (next == ZoneState.DORMANT) {
+            sb.append(" thr=").append(config.dormantAfterMinutes).append("m*")
+                    .append(String.format(Locale.ROOT, "%.2f", scale)).append('=').append(dormantMin).append('m');
+        } else if (next == ZoneState.FROZEN) {
+            sb.append(" thr=").append(config.frozenAfterMinutes).append("m*")
+                    .append(String.format(Locale.ROOT, "%.2f", scale)).append('=').append(frozenMin).append('m');
+        }
+        if (reuseEnabled && reuse != null && next != ZoneState.WARM) {
+            sb.append(" reuse=").append(String.format(Locale.ROOT, "%.2f", reuse.revisitScore(key, now)));
+        }
+        return sb.toString();
+    }
+
+    private void logTransitions(List<String> changes) {
+        if (changes == null || changes.isEmpty()) {
             return;
         }
         int cap = 8;
-        StringBuilder sb = new StringBuilder("dormancy: ");
-        for (int i = 0; i < demotions.size() && i < cap; i++) {
-            if (i > 0) {
-                sb.append(" | ");
-            }
-            sb.append(demotions.get(i));
+        StringBuilder sb = new StringBuilder("dormancy: ").append(changes.size()).append(" changes");
+        for (int i = 0; i < changes.size() && i < cap; i++) {
+            sb.append(" | ").append(changes.get(i));
         }
-        if (demotions.size() > cap) {
-            sb.append(" (+").append(demotions.size() - cap).append(" more)");
+        if (changes.size() > cap) {
+            sb.append(" (+").append(changes.size() - cap).append(" more)");
         }
         DiagnosticLog.info(sb.toString());
     }
@@ -105,24 +137,6 @@ public class ZoneDormancyMap {
             return ZoneState.FROZEN;
         }
         if (idleMin >= config.dormantAfterMinutes) {
-            return ZoneState.DORMANT;
-        }
-        return ZoneState.WARM;
-    }
-
-    private ZoneState stateForZone(ZoneKey key, long idleMin) {
-        ZoneReuseModel reuse = this.reuseModel;
-        if (!config.zoneReuseModelEnabled || reuse == null) {
-            return idleStateForMinutes(idleMin);
-        }
-        double scale = reuse.thresholdScale(
-                key, config.zoneReuseThresholdScaleMin, config.zoneReuseThresholdScaleMax);
-        long dormantMin = Math.round(config.dormantAfterMinutes * scale);
-        long frozenMin = Math.round(config.frozenAfterMinutes * scale);
-        if (idleMin >= frozenMin) {
-            return ZoneState.FROZEN;
-        }
-        if (idleMin >= dormantMin) {
             return ZoneState.DORMANT;
         }
         return ZoneState.WARM;

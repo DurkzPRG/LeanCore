@@ -1,5 +1,6 @@
 package com.durkz.leancore.intelligence;
 
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.memory.GovernorPolicy;
 import com.durkz.leancore.memory.GovernorPreset;
 import com.durkz.leancore.memory.MemorySnapshot;
@@ -51,8 +52,16 @@ public class PolicyBandit {
         }
 
         if (best == null) {
-            return current != null ? current : GovernorPolicy.forTier(preset, pressureTier);
+            GovernorPolicy fallback = current != null ? current : GovernorPolicy.forTier(preset, pressureTier);
+            DiagnosticLog.infoOnChange("bandit",
+                    "bandit: all arms blacklisted/deprioritized, fallback -> " + fallback.key());
+            return fallback;
         }
+        ArmState chosen = arms.get(best.key());
+        int pulls = chosen == null ? 0 : chosen.pulls;
+        DiagnosticLog.infoOnChange("bandit", String.format(Locale.ROOT,
+                "bandit: chose %s (UCB=%.3f pulls=%d %s)",
+                best.key(), bestScore, pulls, pulls <= 0 ? "explore" : "exploit"));
         return best;
     }
 

@@ -1,10 +1,12 @@
 package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
 import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.session.SessionMode;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -43,6 +45,11 @@ public class RetentionAllocator {
         int zonesNeeded = (int) Math.ceil((double) overflowMb / MB_PER_DORMANT_ZONE);
         lastDemotedZones = dormancyMap.demoteFarthestDormant(zonesNeeded);
         lastReclaimedMb = lastDemotedZones * MB_PER_DORMANT_ZONE;
+        if (lastDemotedZones > 0) {
+            DiagnosticLog.info(String.format(Locale.ROOT,
+                    "retention overflow: footprint %d > budget %d MB (+%d), demoted %d zones (~%d MB reclaimed)",
+                    lastFootprintMb, lastBudgetMb, overflowMb, lastDemotedZones, lastReclaimedMb));
+        }
         return lastDemotedZones;
     }
 

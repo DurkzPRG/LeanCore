@@ -109,20 +109,16 @@ public class ZoneChunkUnloader {
         if (!config.enabled || !config.liteUnloadEnabled) {
             return 0;
         }
-        if (playerIdleSec < Math.max(60, config.liteUnloadIdleSeconds)) {
+        long idleThreshold = Math.max(60, config.liteUnloadIdleSeconds);
+        if (playerIdleSec < idleThreshold) {
+            DiagnosticLog.infoOnChange("lite-unload-gate",
+                    "lite unload blocked: player active (need idle " + idleThreshold + "s)");
             return 0;
         }
         long nowMs = System.currentTimeMillis();
         if (UnloadProbeGate.blocksLiteUnload(config)) {
-            if (nowMs - lastProbeGateLogMs >= 60_000L) {
-                lastProbeGateLogMs = nowMs;
-                LeanCorePlugin plugin = LeanCorePlugin.getInstance();
-                if (plugin != null) {
-                    plugin.getLogger().atWarning().log(
-                            "lite unload gated — run /leancore probe before unload sweeps"
-                    );
-                }
-            }
+            DiagnosticLog.infoOnChange("lite-unload-gate",
+                    "lite unload blocked: probe gate (run /leancore probe)");
             return 0;
         }
         if (!RuntimeGuard.active()) {
@@ -136,8 +132,11 @@ public class ZoneChunkUnloader {
         List<ZoneKey> candidates = dormancyMap.unloadCandidateZones(tier, MemoryTier.WATCH);
         if (candidates.isEmpty()) {
             lastCandidateZones = 0;
+            DiagnosticLog.infoOnChange("lite-unload-gate", "lite unload open: 0 dormant candidates");
             return 0;
         }
+        DiagnosticLog.infoOnChange("lite-unload-gate",
+                "lite unload open: " + candidates.size() + " candidate zones (tier=" + tier + ")");
 
         Map<UUID, List<ZoneKey>> byWorld = new HashMap<>();
         for (ZoneKey zone : candidates) {

@@ -407,8 +407,26 @@ public class MemoryRuntime {
             long delaySeconds = activeProfile == RuntimeProfile.LITE
                     ? SoloRuntimePolicy.nextTickDelaySeconds(config, soloPlayerIdleSec())
                     : activeProfile.tickIntervalSeconds(config);
+            logTickCadence(delaySeconds);
             scheduleTick(delaySeconds);
         }
+    }
+
+    private void logTickCadence(long delaySeconds) {
+        String why;
+        if (activeProfile == RuntimeProfile.LITE) {
+            long idleThreshold = Math.max(60, config.soloIdleThresholdSeconds);
+            if (!config.soloAdaptiveTickEnabled) {
+                why = "LITE adaptive tick off";
+            } else if (soloPlayerIdleSec() >= idleThreshold) {
+                why = "LITE player idle >= " + idleThreshold + "s (slow)";
+            } else {
+                why = "LITE player active (< " + idleThreshold + "s)";
+            }
+        } else {
+            why = "profile " + activeProfile;
+        }
+        DiagnosticLog.infoOnChange("tick-cadence", "tick cadence " + delaySeconds + "s why=" + why);
     }
 
     private void persistLearning() {

@@ -138,6 +138,10 @@ public class LeanCoreConfig {
     public int zoneReuseMaxPersistedZones = 4096;
     public int zoneReuseTtlDays = 30;
 
+    // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
+    // reasoning). Enabled by default; set false to silence all [diag] lines.
+    public boolean diagnosticLogEnabled = true;
+
     public static LeanCoreConfig load(Path dataDirectory) {
         File directory = dataDirectory.toFile();
         if (!directory.exists()) {

@@ -1,6 +1,7 @@
 package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.runtime.RuntimeProfile;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
@@ -15,6 +16,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 
 import java.util.Collection;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -74,7 +76,12 @@ public class MemoryGovernor {
 
         allocator.reconcile(preset, mode, sample, demands, dormancyMap);
         if (pressurePolicy.demoteBatch() > 0) {
-            dormancyMap.demoteFarthestDormant(pressurePolicy.demoteBatch());
+            int demoted = dormancyMap.demoteFarthestDormant(pressurePolicy.demoteBatch());
+            if (demoted > 0) {
+                DiagnosticLog.info(String.format(Locale.ROOT,
+                        "demote %d farthest dormant (tier=%s batch=%d)",
+                        demoted, sample.tier(), pressurePolicy.demoteBatch()));
+            }
         }
 
         int unloadedChunks = zoneChunkUnloader.sweep(dormancyMap, sample.tier());
@@ -86,6 +93,9 @@ public class MemoryGovernor {
                 Collection<PlayerRef> online = Universe.get().getPlayers();
                 boolean policyChanged = !samePolicy(activePolicy, toApply);
                 scheduled = applier.apply(toApply, online, demands, policyChanged);
+            } else {
+                DiagnosticLog.infoOnChange("viewradius-gate",
+                        "view radius gate closed why=" + viewRadiusGateReason(sample));
             }
             commitPolicy(toApply, sample, demands, nowMs);
         }
@@ -127,9 +137,15 @@ public class MemoryGovernor {
         int demotedZones = 0;
         if (pressurePolicy.demoteBatch() > 0) {
             demotedZones = dormancyMap.demoteFarthestDormant(pressurePolicy.demoteBatch());
+            if (demotedZones > 0) {
+                DiagnosticLog.info(String.format(Locale.ROOT,
+                        "lite demote %d farthest dormant (tier=%s batch=%d)",
+                        demotedZones, sample.tier(), pressurePolicy.demoteBatch()));
+            }
         }
 
         GovernorPolicy toApply = chooseLitePolicy(pressurePolicy, nowMs);
+        logLitePolicyReason(toApply, pressurePolicy, sample);
         int scheduled = 0;
         if (toApply != null) {
             if (shouldApplyViewRadiusLite(sample, liteSessionStartedMs, nowMs)) {
@@ -188,6 +204,7 @@ public class MemoryGovernor {
         }
 
         GovernorPolicy failed = activePolicy;
+        double triggerRatio = heapAtChange + config.rollbackHeapDelta;
         learningStore.policyBlacklist().blacklist(failed.key(), System.currentTimeMillis() + 15 * 60_000L);
         learningStore.markDirty();
         outcomeTracker.onRollback(failed.key(), contextAtChange);
@@ -195,6 +212,10 @@ public class MemoryGovernor {
         rolledBack = true;
         lastChangeMs = System.currentTimeMillis();
         heapAtChange = sample.heapUsedRatio();
+        DiagnosticLog.info(String.format(Locale.ROOT,
+                "rollback %s -> %s why=heap %.0f%% rose past %.0f%% within %ds (blacklisted 15m)",
+                failed.key(), previousPolicy.key(), sample.heapUsedRatio() * 100.0D,
+                triggerRatio * 100.0D, config.rollbackWindowSec));
     }
 
     private void checkLiteRollback(MemorySnapshot sample) {
@@ -209,10 +230,33 @@ public class MemoryGovernor {
             return;
         }
 
+        GovernorPolicy failed = activePolicy;
+        double triggerRatio = heapAtChange + config.rollbackHeapDelta;
         activePolicy = previousPolicy;
         rolledBack = true;
         lastChangeMs = System.currentTimeMillis();
         heapAtChange = sample.heapUsedRatio();
+        DiagnosticLog.info(String.format(Locale.ROOT,
+                "lite rollback %s -> %s why=heap %.0f%% rose past %.0f%% within %ds",
+                failed.key(), previousPolicy.key(), sample.heapUsedRatio() * 100.0D,
+                triggerRatio * 100.0D, config.rollbackWindowSec));
+    }
+
+    private void logLitePolicyReason(GovernorPolicy toApply, GovernorPolicy pressurePolicy, MemorySnapshot sample) {
+        if (toApply == null) {
+            return;
+        }
+        String why;
+        if (toApply.key().equals(pressurePolicy.key())) {
+            why = "tier " + sample.tier() + " pressure policy";
+        } else {
+            why = "held (min interval " + config.policyChangeMinIntervalSec + "s) want " + pressurePolicy.key();
+        }
+        if (sample.tier() == MemoryTier.COMFORT && toApply.viewScale() < 1.0D) {
+            why += " (chunk-pressure cap)";
+        }
+        DiagnosticLog.infoOnChange("lite-policy", String.format(Locale.ROOT,
+                "lite policy %s view=%.0f%% why=%s", toApply.key(), toApply.viewScale() * 100.0D, why));
     }
 
     private GovernorPolicy chooseLitePolicy(GovernorPolicy pressurePolicy, long nowMs) {
@@ -248,6 +292,9 @@ public class MemoryGovernor {
             Map<UUID, RetentionDemand> demands
     ) {
         if (allocator.lastFootprintMb() > allocator.lastBudgetMb()) {
+            DiagnosticLog.infoOnChange("policy-decision", String.format(Locale.ROOT,
+                    "policy decision: budget override -> %s (footprint %d > budget %d MB)",
+                    pressurePolicy.key(), allocator.lastFootprintMb(), allocator.lastBudgetMb()));
             return pressurePolicy;
         }
 
@@ -255,9 +302,14 @@ public class MemoryGovernor {
                 ? config.policyChangeMinIntervalSec
                 : (System.currentTimeMillis() - lastChangeMs) / 1000L;
         if (activePolicy != null && elapsedSec < config.policyChangeMinIntervalSec) {
+            DiagnosticLog.infoOnChange("policy-decision", String.format(Locale.ROOT,
+                    "policy decision: held %s (min interval %ds)",
+                    activePolicy.key(), config.policyChangeMinIntervalSec));
             return activePolicy;
         }
 
+        DiagnosticLog.infoOnChange("policy-decision",
+                "policy decision: bandit selecting (tier <= " + pressurePolicy.tier() + ")");
         double meanDemand = meanDemand(demands);
         return bandit.select(
                 preset,
@@ -336,6 +388,19 @@ public class MemoryGovernor {
                 sample.onlinePlayers(),
                 viewRadiusGraceActive(System.currentTimeMillis())
         );
+    }
+
+    private String viewRadiusGateReason(MemorySnapshot sample) {
+        if (!config.viewRadiusGovernanceEnabled) {
+            return "viewRadiusGovernance disabled";
+        }
+        if (viewRadiusGraceActive(System.currentTimeMillis())) {
+            return "grace active";
+        }
+        if (!config.dedicatedServerMode && sample.onlinePlayers() <= 1) {
+            return "solo (need 2+ players or dedicated)";
+        }
+        return "closed";
     }
 
     private boolean shouldApplyViewRadiusLite(MemorySnapshot sample, long liteSessionStartedMs, long nowMs) {
