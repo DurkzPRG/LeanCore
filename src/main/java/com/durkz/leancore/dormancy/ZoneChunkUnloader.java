@@ -2,6 +2,7 @@ package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.probe.UnloadProbeGate;
 import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.runtime.WorldDispatch;
@@ -96,6 +97,11 @@ public class ZoneChunkUnloader {
             unloadOutcomeTracker.beginSweepWindow();
             unloadOutcomeTracker.notePolicyUnload(unloaded);
         }
+        if (unloaded > 0) {
+            DiagnosticLog.info(String.format(java.util.Locale.ROOT,
+                    "unload: %d chunks from %d candidate zones (tier=%s, reason=standard)",
+                    unloaded, candidates.size(), tier));
+        }
         return unloaded;
     }
 
@@ -162,6 +168,11 @@ public class ZoneChunkUnloader {
         if (unloadOutcomeTracker != null) {
             unloadOutcomeTracker.beginSweepWindow();
             unloadOutcomeTracker.notePolicyUnload(unloaded);
+        }
+        if (unloaded > 0) {
+            DiagnosticLog.info(String.format(java.util.Locale.ROOT,
+                    "unload: %d chunks from %d candidate zones (tier=%s, reason=lite-idle %ds)",
+                    unloaded, candidates.size(), tier, playerIdleSec));
         }
         return unloaded;
     }

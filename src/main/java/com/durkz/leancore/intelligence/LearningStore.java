@@ -1,6 +1,7 @@
 package com.durkz.leancore.intelligence;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.dormancy.ZoneReuseModel;
 import com.durkz.leancore.memory.MemoryTier;
 import com.durkz.leancore.memory.ServerContextTracker;
@@ -278,6 +279,10 @@ public class LearningStore {
             flushCount++;
             flushedGeneration = stateGeneration;
             lastFlushAtMs = now;
+            DiagnosticLog.info(String.format(Locale.ROOT,
+                    "persist: players=%d zones=%d pruned=%d size=%dB (v%d)",
+                    players.size(), zoneReuseModel.size(), lastPrunedCount,
+                    lastStateFileBytes, SCHEMA_VERSION));
         } catch (IOException ex) {
             persistFailCount++;
             warnPersist("learning flush failed", ex);

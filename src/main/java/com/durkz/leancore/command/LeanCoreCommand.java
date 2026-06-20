@@ -2,6 +2,7 @@ package com.durkz.leancore.command;
 
 import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.dormancy.ZoneHeatmapEntry;
 import com.durkz.leancore.dormancy.ZoneKey;
 import com.durkz.leancore.dormancy.ZoneState;
@@ -81,6 +82,15 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
     private static void say(CommandContext ctx, String text, String color) {
         ctx.sendMessage(Message.raw(text).color(color));
+        DiagnosticLog.info("[cmd] " + text);
+    }
+
+    private static void logInvoke(String sub) {
+        DiagnosticLog.info("[cmd] /leancore " + sub);
+    }
+
+    private static void logInvoke(String sub, PlayerRef who) {
+        DiagnosticLog.info("[cmd] /leancore " + sub + " by " + (who != null ? who.getUuid() : "?"));
     }
 
     private static final class StatusCmd extends CommandBase {
@@ -90,6 +100,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            logInvoke("status");
             LeanCorePlugin plugin = plugin(ctx);
             if (plugin == null) {
                 return;
@@ -151,6 +162,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            logInvoke("memory");
             LeanCorePlugin plugin = plugin(ctx);
             if (plugin == null) {
                 return;
@@ -201,6 +213,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            logInvoke("savings");
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = plugin(ctx);
             if (rt == null || plugin == null) {
@@ -233,6 +246,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            logInvoke("zones");
             MemoryRuntime rt = runtime(ctx);
             if (rt == null) {
                 return;
@@ -257,6 +271,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            logInvoke("learn");
             MemoryRuntime rt = runtime(ctx);
             if (rt == null) {
                 return;
@@ -296,6 +311,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("learn player", playerRef);
             MemoryRuntime rt = runtime(ctx);
             if (rt == null) {
                 return;
@@ -370,6 +386,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            logInvoke("hud");
             say(ctx, "usage: /leancore hud on | off | status", "#AAAAAA");
         }
     }
@@ -382,6 +399,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("hud on", playerRef);
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = LeanCorePlugin.getInstance();
             if (rt == null || plugin == null) {
@@ -412,6 +430,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("hud off", playerRef);
             MemoryRuntime rt = runtime(ctx);
             if (rt == null) {
                 return;
@@ -429,6 +448,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("hud status", playerRef);
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = LeanCorePlugin.getInstance();
             if (rt == null || plugin == null) {
@@ -453,6 +473,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("heatmap", playerRef);
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = LeanCorePlugin.getInstance();
             if (rt == null || plugin == null) {
@@ -501,6 +522,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
 
         @Override
         protected void executeSync(CommandContext ctx) {
+            logInvoke("zone");
             say(ctx, "usage: /leancore zone pin | unpin | pins", "#AAAAAA");
         }
     }
@@ -513,6 +535,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("zone pin", playerRef);
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = LeanCorePlugin.getInstance();
             if (rt == null || plugin == null) {
@@ -544,6 +567,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("zone unpin", playerRef);
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = LeanCorePlugin.getInstance();
             if (rt == null || plugin == null) {
@@ -575,6 +599,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("zone pins", playerRef);
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = LeanCorePlugin.getInstance();
             if (rt == null || plugin == null) {
@@ -604,6 +629,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         @Override
         protected void execute(CommandContext ctx, Store<EntityStore> store, Ref<EntityStore> ref,
                                PlayerRef playerRef, World world) {
+            logInvoke("probe", playerRef);
             MemoryRuntime rt = runtime(ctx);
             LeanCorePlugin plugin = plugin(ctx);
             if (rt == null || plugin == null) {

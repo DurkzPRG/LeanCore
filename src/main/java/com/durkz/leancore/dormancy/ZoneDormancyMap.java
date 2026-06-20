@@ -1,6 +1,7 @@
 package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -11,6 +12,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,13 +55,22 @@ public class ZoneDormancyMap {
             lastHotAtMs.put(key, now);
         }
 
+        List<String> demotions = null;
         for (Map.Entry<ZoneKey, Long> entry : lastHotAtMs.entrySet()) {
             ZoneKey key = entry.getKey();
             if (hotNow.contains(key) || pinned.contains(key)) {
                 continue;
             }
             long idleMin = (now - entry.getValue()) / 60_000L;
-            zones.put(key, stateForZone(key, idleMin));
+            ZoneState prev = zones.get(key);
+            ZoneState next = stateForZone(key, idleMin);
+            zones.put(key, next);
+            if (next != prev && (next == ZoneState.DORMANT || next == ZoneState.FROZEN)) {
+                if (demotions == null) {
+                    demotions = new ArrayList<>();
+                }
+                demotions.add((prev == null ? "NEW" : prev.name()) + "->" + next.name() + " " + key);
+            }
         }
 
         for (ZoneKey key : pinned) {
@@ -68,6 +79,25 @@ public class ZoneDormancyMap {
         }
 
         pruneStaleZones(now);
+        logDemotions(demotions);
+    }
+
+    private void logDemotions(List<String> demotions) {
+        if (demotions == null || demotions.isEmpty()) {
+            return;
+        }
+        int cap = 8;
+        StringBuilder sb = new StringBuilder("dormancy: ");
+        for (int i = 0; i < demotions.size() && i < cap; i++) {
+            if (i > 0) {
+                sb.append(" | ");
+            }
+            sb.append(demotions.get(i));
+        }
+        if (demotions.size() > cap) {
+            sb.append(" (+").append(demotions.size() - cap).append(" more)");
+        }
+        DiagnosticLog.info(sb.toString());
     }
 
     ZoneState idleStateForMinutes(long idleMin) {
@@ -306,6 +336,36 @@ public class ZoneDormancyMap {
             return 1.0D;
         }
         return reuse.thresholdScale(key, config.zoneReuseThresholdScaleMin, config.zoneReuseThresholdScaleMax);
+    }
+
+    /** Compact reuse summary for the log/status. Iterates tracked zones only, no player lookups. */
+    public String reuseSummaryLine(int topN) {
+        ZoneReuseModel reuse = this.reuseModel;
+        if (reuse == null) {
+            return "reuse model off";
+        }
+        long now = System.currentTimeMillis();
+        List<Map.Entry<ZoneKey, Double>> scored = new ArrayList<>();
+        for (ZoneKey key : zones.keySet()) {
+            scored.add(Map.entry(key, reuse.revisitScore(key, now)));
+        }
+        scored.sort(Map.Entry.<ZoneKey, Double>comparingByValue(Comparator.reverseOrder()));
+        StringBuilder sb = new StringBuilder();
+        sb.append("reuse tracked=").append(reuse.size()).append(" top:");
+        int cap = Math.max(1, topN);
+        int shown = 0;
+        for (Map.Entry<ZoneKey, Double> e : scored) {
+            if (shown >= cap) {
+                break;
+            }
+            sb.append(String.format(Locale.ROOT, " %s=%.2f(x%.2f)",
+                    e.getKey(), e.getValue(), thresholdScale(e.getKey())));
+            shown++;
+        }
+        if (shown == 0) {
+            sb.append(" none");
+        }
+        return sb.toString();
     }
 
     private List<double[]> playerPositions() {

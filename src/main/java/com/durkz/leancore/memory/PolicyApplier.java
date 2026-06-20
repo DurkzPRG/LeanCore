@@ -1,6 +1,7 @@
 package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.runtime.RuntimeProfile;
 import com.durkz.leancore.runtime.WorldDispatch;
@@ -116,8 +117,15 @@ public class PolicyApplier {
         }
 
         if (scheduled > 0) {
+            String previousKey = lastAppliedPolicyKey;
             lastApplyMs = nowMs;
             lastAppliedPolicyKey = applyKey;
+            if (!applyKey.equals(previousKey)) {
+                DiagnosticLog.info(String.format(Locale.ROOT,
+                        "policy: %s viewScale=%.0f%% applied to %d player(s)%s",
+                        policy.key(), policy.viewScale() * 100.0D, scheduled,
+                        previousKey == null ? "" : " (was " + previousKey + ")"));
+            }
         }
         return scheduled;
     }

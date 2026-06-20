@@ -4,8 +4,10 @@ import com.durkz.leancore.LeanCorePlugin;
 import com.durkz.leancore.alert.CriticalWebhookNotifier;
 import com.durkz.leancore.config.DedicatedBootstrap;
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
+import com.durkz.leancore.dormancy.ZoneState;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.EngineUnloadPoller;
 import com.durkz.leancore.intelligence.LearningStore;
@@ -27,7 +29,10 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.Executors;
@@ -168,6 +173,73 @@ public class MemoryRuntime {
                 initialDelay,
                 activeProfile.tickIntervalSeconds(config)
         );
+        logStartupDiagnostics(initialDelay);
+    }
+
+    private void logStartupDiagnostics(long initialDelaySeconds) {
+        List<String> lines = new ArrayList<>();
+        lines.add("===== LeanCore startup (profile=" + activeProfile + ") =====");
+        lines.add(String.format(Locale.ROOT,
+                "schedule initialDelay=%ds tick=%ds motionSample=%ds persist=%ds",
+                initialDelaySeconds,
+                activeProfile.tickIntervalSeconds(config),
+                Math.max(1, config.motionSampleIntervalSeconds),
+                Math.max(1, config.persistIntervalSeconds)));
+        lines.add(String.format(Locale.ROOT,
+                "flags govern=%s learning=%s unload=%s lite[gov=%s view=%s learning=%s unload=%s]",
+                config.governEnabled, config.learningEnabled, config.unloadEnabled,
+                config.liteMemoryGovernorEnabled, config.liteViewRadiusEnabled,
+                config.liteLearningEnabled, config.liteUnloadEnabled));
+        lines.add(String.format(Locale.ROOT,
+                "thresholds watch=%.2f tight=%.2f critical=%.2f dormantAfter=%dm frozenAfter=%dm",
+                config.watchHeapRatio, config.tightHeapRatio, config.criticalHeapRatio,
+                config.dormantAfterMinutes, config.frozenAfterMinutes));
+        lines.add(String.format(Locale.ROOT,
+                "motion=%s viewBoost=%s zoneReuse=%s",
+                config.motionModelEnabled, config.motionViewRadiusBoostEnabled, config.zoneReuseModelEnabled));
+        lines.add("loaded " + learningStore.statusLine());
+        lines.add("==============================================");
+        DiagnosticLog.info(lines);
+    }
+
+    private void logShutdownDiagnostics() {
+        List<String> lines = new ArrayList<>();
+        lines.add("===== LeanCore shutdown (profile=" + activeProfile + ") =====");
+        MemorySnapshot s = lastSample();
+        if (s != null) {
+            lines.add(String.format(Locale.ROOT,
+                    "heap %d/%d MB (%.0f%%) tier=%s online=%d",
+                    s.heapUsedBytes() / (1024 * 1024),
+                    s.heapMaxBytes() / (1024 * 1024),
+                    s.heapUsedRatio() * 100.0D,
+                    s.tier(),
+                    s.onlinePlayers()));
+        }
+        GovernorStatus gov = governorStatus();
+        if (gov.enabled()) {
+            lines.add(String.format(Locale.ROOT,
+                    "governor footprint %d/%d MB demoted=%d reclaimed~%d MB unloaded=%d chunks candidates=%d%s",
+                    gov.totalFootprintMb(), gov.budgetMb(), gov.demotedZones(),
+                    gov.reclaimedMbEstimate(), gov.unloadedChunks(), gov.unloadCandidateZones(),
+                    gov.rolledBack() ? " ROLLBACK" : ""));
+        } else {
+            lines.add("governor disabled");
+        }
+        lines.add(learningStore.statusLine());
+        lines.add(learningStore.windowLine());
+        lines.add(learningStore.serverLine());
+        lines.add(String.format(Locale.ROOT,
+                "zones hot=%d warm=%d dormant=%d frozen=%d pinned=%d",
+                dormancyMap.countByState(ZoneState.HOT),
+                dormancyMap.countByState(ZoneState.WARM),
+                dormancyMap.countByState(ZoneState.DORMANT),
+                dormancyMap.countByState(ZoneState.FROZEN),
+                dormancyMap.pinnedZones().size()));
+        if (config.zoneReuseModelEnabled) {
+            lines.add(dormancyMap.reuseSummaryLine(6));
+        }
+        lines.add("==============================================");
+        DiagnosticLog.info(lines);
     }
 
     public boolean isRunning() {
@@ -196,6 +268,7 @@ public class MemoryRuntime {
         motionTickPending.set(false);
         stopScheduler();
         persistLearning();
+        logShutdownDiagnostics();
         if (hudService != null) {
             hudService.shutdown();
             hudService.sessions().save();
