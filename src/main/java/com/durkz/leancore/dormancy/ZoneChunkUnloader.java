@@ -73,7 +73,6 @@ public class ZoneChunkUnloader {
         }
 
         int maxChunks = Math.max(1, config.unloadMaxChunksPerSweep);
-        List<ChunkTracker> trackers = collectTrackers();
         int unloaded = 0;
 
         for (Map.Entry<UUID, List<ZoneKey>> entry : byWorld.entrySet()) {
@@ -85,6 +84,7 @@ public class ZoneChunkUnloader {
                 continue;
             }
             List<ZoneKey> zones = List.copyOf(entry.getValue());
+            List<ChunkTracker> trackers = collectTrackers(entry.getKey());
             int[] counter = new int[1];
             WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
             unloaded += counter[0];
@@ -144,7 +144,6 @@ public class ZoneChunkUnloader {
         }
 
         int maxChunks = Math.max(1, config.liteUnloadMaxChunksPerSweep);
-        List<ChunkTracker> trackers = collectTrackers();
         int unloaded = 0;
 
         for (Map.Entry<UUID, List<ZoneKey>> entry : byWorld.entrySet()) {
@@ -156,6 +155,7 @@ public class ZoneChunkUnloader {
                 continue;
             }
             List<ZoneKey> zones = List.copyOf(entry.getValue());
+            List<ChunkTracker> trackers = collectTrackers(entry.getKey());
             int[] counter = new int[1];
             WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
             unloaded += counter[0];
@@ -184,10 +184,13 @@ public class ZoneChunkUnloader {
         return lastCandidateZones;
     }
 
-    private static List<ChunkTracker> collectTrackers() {
+    private static List<ChunkTracker> collectTrackers(UUID worldUuid) {
         List<ChunkTracker> trackers = new ArrayList<>();
         for (PlayerRef ref : Universe.get().getPlayers()) {
             if (!ref.isValid()) {
+                continue;
+            }
+            if (worldUuid != null && !worldUuid.equals(ref.getWorldUuid())) {
                 continue;
             }
             ChunkTracker tracker = ref.getChunkTracker();

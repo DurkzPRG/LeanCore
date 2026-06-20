@@ -224,34 +224,66 @@ public class PolicyApplier {
         if (!config.motionModelEnabled || !config.motionViewRadiusBoostEnabled) {
             return;
         }
-        int minDelta = Math.max(1, config.minViewRadiusDelta);
+        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
         for (PlayerRef playerRef : online) {
             if (playerRef == null || !playerRef.isValid()) {
                 continue;
             }
-            Ref<EntityStore> ref = playerRef.getReference();
-            if (ref == null) {
+            UUID worldUuid = playerRef.getWorldUuid();
+            if (worldUuid == null) {
                 continue;
             }
-            Store<EntityStore> store = ref.getStore();
-            Player player = store.getComponent(ref, Player.getComponentType());
-            if (player == null) {
+            World world = Universe.get().getWorld(worldUuid);
+            if (world == null || !world.isAlive()) {
                 continue;
             }
-            UUID playerId = playerRef.getUuid();
-            int current = player.getClientViewRadius();
-            int base = viewRadiusCache.baseViewRadius(playerId);
-            if (base <= 0) {
-                base = current;
-                viewRadiusCache.noteBaseViewRadius(playerId, base);
+            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(playerRef);
+        }
+
+        int minDelta = Math.max(1, config.minViewRadiusDelta);
+        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
+            World world = Universe.get().getWorld(entry.getKey());
+            if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
+                continue;
             }
-            double motionScale = viewRadiusCache.motionViewScale(
-                    playerId, config.motionMinSpeedBlocksPerSecond, config.motionViewRadiusMaxBoost);
-            int boosted = applyMotionBoost(base, motionScale, config.maxClientViewRadius);
-            viewRadiusCache.noteMotionApplied(playerId, boosted, boosted - base);
-            if (Math.abs(boosted - current) >= minDelta) {
-                player.setClientViewRadius(boosted);
-            }
+            List<PlayerRef> batch = List.copyOf(entry.getValue());
+            WorldDispatch.run(world, () -> {
+                if (!RuntimeGuard.active()) {
+                    return;
+                }
+                for (PlayerRef playerRef : batch) {
+                    applyMotionLiveOne(playerRef, minDelta);
+                }
+            });
+        }
+    }
+
+    private void applyMotionLiveOne(PlayerRef playerRef, int minDelta) {
+        if (playerRef == null || !playerRef.isValid()) {
+            return;
+        }
+        Ref<EntityStore> ref = playerRef.getReference();
+        if (ref == null) {
+            return;
+        }
+        Store<EntityStore> store = ref.getStore();
+        Player player = store.getComponent(ref, Player.getComponentType());
+        if (player == null) {
+            return;
+        }
+        UUID playerId = playerRef.getUuid();
+        int current = player.getClientViewRadius();
+        int base = viewRadiusCache.baseViewRadius(playerId);
+        if (base <= 0) {
+            base = current;
+            viewRadiusCache.noteBaseViewRadius(playerId, base);
+        }
+        double motionScale = viewRadiusCache.motionViewScale(
+                playerId, config.motionMinSpeedBlocksPerSecond, config.motionViewRadiusMaxBoost);
+        int boosted = applyMotionBoost(base, motionScale, config.maxClientViewRadius);
+        viewRadiusCache.noteMotionApplied(playerId, boosted, boosted - base);
+        if (Math.abs(boosted - current) >= minDelta) {
+            player.setClientViewRadius(boosted);
         }
     }
 

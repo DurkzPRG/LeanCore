@@ -518,10 +518,10 @@ public class LearningStore {
                 lastStateFileBytes = Files.size(gzip);
                 return;
             } catch (IOException ex) {
-                warnPersist("learning state v7 load failed; trying legacy", ex);
+                warnPersist("learning state load failed; trying legacy", ex);
                 quarantineCorruptState(gzip);
             } catch (RuntimeException ex) {
-                warnPersist("learning state v7 corrupt; trying legacy", ex);
+                warnPersist("learning state corrupt; trying legacy", ex);
                 quarantineCorruptState(gzip);
             }
         }

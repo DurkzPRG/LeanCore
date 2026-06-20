@@ -103,7 +103,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `liteUnloadEnabled` | `true` | AFK reclaim; still needs probe |
 | `liteUnloadIdleSeconds` | `180` | Idle before unload sweeps |
 
-Learning snapshot: `mods/durkz_LeanCore/learning.state.gz` (schema v7, gzip binary). Legacy `learning.state` is migrated on first flush.
+Learning snapshot: `mods/durkz_LeanCore/learning.state.gz` (schema v8, gzip binary). Legacy `learning.state` is migrated on first flush.
 
 Permissions: `durkz.leancore.hud`, `durkz.leancore.admin`
 

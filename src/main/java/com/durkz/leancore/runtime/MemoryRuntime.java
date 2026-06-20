@@ -7,6 +7,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
+import com.durkz.leancore.dormancy.ZoneKey;
 import com.durkz.leancore.dormancy.ZoneState;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.EngineUnloadPoller;
@@ -31,8 +32,10 @@ import com.hypixel.hytale.server.core.universe.world.World;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.Executors;
@@ -351,44 +354,28 @@ public class MemoryRuntime {
         if (online.isEmpty()) {
             return;
         }
-        World world = resolvePrimaryWorld(online);
-        if (world == null) {
-            return;
-        }
         if (!motionTickPending.compareAndSet(false, true)) {
             return;
         }
         long nowMs = System.currentTimeMillis();
         try {
-            UUID worldUuid = world.getWorldConfig().getUuid();
-            world.execute(() -> {
-                try {
-                    if (!running) {
-                        return;
-                    }
-                    GovernorWorldContext.enter(worldUuid);
-                    try {
-                        if (config.motionModelEnabled) {
-                            classifier.samplePositionsLite(online, nowMs);
-                            if (config.motionViewRadiusBoostEnabled && policyApplier != null) {
-                                policyApplier.applyMotionLive(online, activeProfile);
-                            }
-                        }
-                        if (RuntimeGuard.active() && activeProfile.runsHud(config) && hudService != null) {
-                            hudService.refresh(this);
-                        }
-                    } finally {
-                        GovernorWorldContext.exit();
-                    }
-                } catch (Exception e) {
-                    plugin.getLogger().atWarning().withCause(e).log("motion tick failed");
-                } finally {
-                    motionTickPending.set(false);
+            List<WorldBatch> batches = resolveAliveWorldBatches(online);
+            if (batches.isEmpty()) {
+                return;
+            }
+            if (config.motionModelEnabled) {
+                samplePositionsPerWorld(batches, nowMs, false);
+                if (config.motionViewRadiusBoostEnabled && policyApplier != null) {
+                    policyApplier.applyMotionLive(online, activeProfile);
                 }
-            });
-        } catch (RuntimeException e) {
+            }
+            if (RuntimeGuard.active() && activeProfile.runsHud(config) && hudService != null) {
+                hudService.refresh(this);
+            }
+        } catch (Exception e) {
+            plugin.getLogger().atWarning().withCause(e).log("motion tick failed");
+        } finally {
             motionTickPending.set(false);
-            plugin.getLogger().atFine().withCause(e).log("motion tick not queued — world shutting down");
         }
     }
 
@@ -475,8 +462,8 @@ public class MemoryRuntime {
         }
 
         final RuntimeProfile governorProfile = profile;
-        World world = resolvePrimaryWorld(online);
-        if (world == null) {
+        List<WorldBatch> batches = resolveAliveWorldBatches(online);
+        if (batches.isEmpty()) {
             if (nowMs - lastDeferredGovernorLogMs >= 60_000L) {
                 lastDeferredGovernorLogMs = nowMs;
                 plugin.getLogger().atFine().log(
@@ -491,21 +478,11 @@ public class MemoryRuntime {
             return;
         }
         try {
-            UUID worldUuid = world.getWorldConfig().getUuid();
-            world.execute(() -> {
-                try {
-                    if (running) {
-                        tickGovernor(governorProfile, online, nowMs, worldUuid);
-                    }
-                } catch (Exception e) {
-                    plugin.getLogger().atWarning().withCause(e).log("governor tick failed");
-                } finally {
-                    governorWorldTickPending.set(false);
-                }
-            });
-        } catch (RuntimeException e) {
+            tickGovernorOnWorld(governorProfile, online, nowMs, batches);
+        } catch (Exception e) {
+            plugin.getLogger().atWarning().withCause(e).log("governor tick failed");
+        } finally {
             governorWorldTickPending.set(false);
-            plugin.getLogger().atFine().withCause(e).log("governor tick not queued — world shutting down");
         }
     }
 
@@ -527,19 +504,19 @@ public class MemoryRuntime {
         }
     }
 
-    private void tickGovernor(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs, UUID worldUuid) {
-        GovernorWorldContext.enter(worldUuid);
-        try {
-            tickGovernorOnWorld(profile, online, nowMs);
-        } finally {
-            GovernorWorldContext.exit();
+    private void tickGovernorOnWorld(
+            RuntimeProfile profile,
+            Collection<PlayerRef> online,
+            long nowMs,
+            List<WorldBatch> batches
+    ) {
+        if (profile.tracksPlayerMotion()) {
+            samplePositionsPerWorld(batches, nowMs, true);
         }
-    }
 
-    private void tickGovernorOnWorld(RuntimeProfile profile, Collection<PlayerRef> online, long nowMs) {
         long dormancyIntervalMs = dormancyIntervalMs(profile);
         if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= dormancyIntervalMs) {
-            dormancyMap.refreshFromPlayers();
+            refreshDormancyPerWorld(batches, nowMs);
             lastDormancyRefreshMs = nowMs;
         }
 
@@ -554,10 +531,6 @@ public class MemoryRuntime {
         lastSample = sample;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
         learningStore.holdoutCohort().noteOnline(online, sample.heapUsedRatio(), nowMs);
-
-        if (profile.tracksPlayerMotion()) {
-            classifier.samplePositions(online, nowMs);
-        }
 
         var demands = classifier.snapshotDemands(nowMs);
         if (profile.runsLearning(config)) {
@@ -592,109 +565,141 @@ public class MemoryRuntime {
         }
     }
 
-    private static World resolvePrimaryWorld(Collection<PlayerRef> online) {
-        if (online == null) {
-            return null;
+    /** Online players grouped by their alive world, so per-player work runs on the right thread. */
+    private static List<WorldBatch> resolveAliveWorldBatches(Collection<PlayerRef> online) {
+        if (online == null || online.isEmpty()) {
+            return List.of();
         }
+        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
         for (PlayerRef ref : online) {
             if (ref == null || !ref.isValid() || ref.getWorldUuid() == null) {
                 continue;
             }
-            World world = Universe.get().getWorld(ref.getWorldUuid());
+            byWorld.computeIfAbsent(ref.getWorldUuid(), ignored -> new ArrayList<>()).add(ref);
+        }
+        List<WorldBatch> batches = new ArrayList<>();
+        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
+            World world = Universe.get().getWorld(entry.getKey());
             if (world != null && world.isAlive()) {
-                return world;
+                batches.add(new WorldBatch(entry.getKey(), world, List.copyOf(entry.getValue())));
             }
         }
-        return null;
+        return batches;
+    }
+
+    /** Samples player motion on each world's own thread (transform reads need world affinity). */
+    private void samplePositionsPerWorld(List<WorldBatch> batches, long nowMs, boolean fullProbe) {
+        for (WorldBatch batch : batches) {
+            WorldDispatch.run(batch.world(), () -> {
+                GovernorWorldContext.enter(batch.worldUuid());
+                try {
+                    if (fullProbe) {
+                        classifier.samplePositions(batch.players(), nowMs);
+                    } else {
+                        classifier.samplePositionsLite(batch.players(), nowMs);
+                    }
+                } finally {
+                    GovernorWorldContext.exit();
+                }
+            });
+        }
+    }
+
+    /**
+     * Collects hot zones per world (each on its world thread, reading transforms) and then runs
+     * the pure dormancy state machine once. {@code WorldDispatch.run} blocks, so the per-world
+     * gathers complete before the aggregated refresh runs.
+     */
+    private void refreshDormancyPerWorld(List<WorldBatch> batches, long nowMs) {
+        List<ZoneKey> hot = new ArrayList<>();
+        for (WorldBatch batch : batches) {
+            WorldDispatch.run(batch.world(), () -> {
+                GovernorWorldContext.enter(batch.worldUuid());
+                try {
+                    hot.addAll(ZoneDormancyMap.hotZonesForPlayers(batch.players()));
+                } finally {
+                    GovernorWorldContext.exit();
+                }
+            });
+        }
+        dormancyMap.refreshFromHotZones(hot, nowMs);
+    }
+
+    private record WorldBatch(UUID worldUuid, World world, List<PlayerRef> players) {
     }
 
     private void tickLite(java.util.Collection<PlayerRef> online, long nowMs) {
-        World world = resolvePrimaryWorld(online);
-        if (world == null) {
+        List<WorldBatch> batches = resolveAliveWorldBatches(online);
+        if (batches.isEmpty()) {
             return;
         }
         if (!governorWorldTickPending.compareAndSet(false, true)) {
             return;
         }
         try {
-            UUID worldUuid = world.getWorldConfig().getUuid();
-            world.execute(() -> {
-                try {
-                    if (running) {
-                        tickLiteOnWorld(online, nowMs, worldUuid);
-                    }
-                } catch (Exception e) {
-                    plugin.getLogger().atWarning().withCause(e).log("lite tick failed");
-                } finally {
-                    governorWorldTickPending.set(false);
-                }
-            });
-        } catch (RuntimeException e) {
+            tickLiteOnWorld(online, nowMs, batches);
+        } catch (Exception e) {
+            plugin.getLogger().atWarning().withCause(e).log("lite tick failed");
+        } finally {
             governorWorldTickPending.set(false);
-            plugin.getLogger().atFine().withCause(e).log("lite tick not queued — world shutting down");
         }
     }
 
-    private void tickLiteOnWorld(Collection<PlayerRef> online, long nowMs, UUID worldUuid) {
-        GovernorWorldContext.enter(worldUuid);
-        try {
-            if (!online.isEmpty()) {
-                classifier.samplePositionsLite(online, nowMs);
-            }
-            if (SoloRuntimePolicy.shouldRefreshDormancy(
-                    config,
-                    lastLiteX,
-                    lastLiteZ,
-                    lastLitePositioned,
-                    nowMs,
-                    lastDormancyRefreshMs
-            )) {
-                dormancyMap.refreshFromPlayers();
-                lastDormancyRefreshMs = nowMs;
-                SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
-                lastLiteX = motion.x();
-                lastLiteZ = motion.z();
-                lastLitePositioned = motion.positioned();
-            }
+    private void tickLiteOnWorld(Collection<PlayerRef> online, long nowMs, List<WorldBatch> batches) {
+        if (!online.isEmpty()) {
+            samplePositionsPerWorld(batches, nowMs, false);
+        }
+        if (SoloRuntimePolicy.shouldRefreshDormancy(
+                config,
+                lastLiteX,
+                lastLiteZ,
+                lastLitePositioned,
+                nowMs,
+                lastDormancyRefreshMs
+        )) {
+            refreshDormancyPerWorld(batches, nowMs);
+            lastDormancyRefreshMs = nowMs;
+            SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
+            lastLiteX = motion.x();
+            lastLiteZ = motion.z();
+            lastLitePositioned = motion.positioned();
+        }
 
-            if (!SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {
-                return;
-            }
+        if (!SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {
+            return;
+        }
 
-            MemorySnapshot sample = sensor.sample(false);
-            lastSample = sample;
-            lastLiteHeapSampleMs = nowMs;
-            lastMode = sessionDetector.detect(sample.onlinePlayers());
-            if (gcHintScheduler.maybeHint(nowMs, soloPlayerIdleSec(), sample.tier(), RuntimeProfile.LITE)) {
-                plugin.getLogger().atFine().log("GC hint issued (LITE idle, tier COMFORT)");
-            }
-            if (!activeProfile.runsLiteGovernor(config)) {
-                return;
-            }
+        MemorySnapshot sample = sensor.sample(false);
+        lastSample = sample;
+        lastLiteHeapSampleMs = nowMs;
+        lastMode = sessionDetector.detect(sample.onlinePlayers());
+        if (gcHintScheduler.maybeHint(nowMs, soloPlayerIdleSec(), sample.tier(), RuntimeProfile.LITE)) {
+            plugin.getLogger().atFine().log("GC hint issued (LITE idle, tier COMFORT)");
+        }
+        if (!activeProfile.runsLiteGovernor(config)) {
+            return;
+        }
 
-            var demands = classifier.snapshotDemands(nowMs);
-            if (activeProfile.runsLiteLearning(config)) {
-                learningStore.noteHeap(sample.heapUsedRatio());
-                learningStore.noteTier(sample.tier());
-                learningStore.noteDemands(demands);
-                classifier.syncToStore(learningStore);
-            }
-            double chunkSaturation = sampleChunkSaturation();
-            governor.tickLiteMode(
-                    sample,
-                    demands,
-                    dormancyMap,
-                    chunkSaturation,
-                    liteSessionStartedMs,
-                    soloPlayerIdleSec(),
-                    nowMs
-            );
-            GovernorStatus govStatus = governor.status();
-            if (govStatus.enabled()) {
-                sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
-            }
-        } finally {
-            GovernorWorldContext.exit();
+        var demands = classifier.snapshotDemands(nowMs);
+        if (activeProfile.runsLiteLearning(config)) {
+            learningStore.noteHeap(sample.heapUsedRatio());
+            learningStore.noteTier(sample.tier());
+            learningStore.noteDemands(demands);
+            classifier.syncToStore(learningStore);
+        }
+        double chunkSaturation = sampleChunkSaturation();
+        governor.tickLiteMode(
+                sample,
+                demands,
+                dormancyMap,
+                chunkSaturation,
+                liteSessionStartedMs,
+                soloPlayerIdleSec(),
+                nowMs
+        );
+        GovernorStatus govStatus = governor.status();
+        if (govStatus.enabled()) {
+            sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
         }
     }
 

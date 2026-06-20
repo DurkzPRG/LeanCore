@@ -43,6 +43,15 @@ public class ZoneDormancyMap {
         refreshFromPlayerZones(collectHotPlayerZones(), System.currentTimeMillis());
     }
 
+    /**
+     * Runs the dormancy state machine from a pre-collected set of hot zones. The runtime gathers
+     * hot zones per world (each on its own world thread) and calls this once on the scheduler
+     * thread; the aging/transition logic touches no PlayerRef, so it is safe off the world thread.
+     */
+    public void refreshFromHotZones(Collection<ZoneKey> hotZones, long now) {
+        refreshFromPlayerZones(hotZones, now);
+    }
+
     void refreshFromPlayerZones(Collection<ZoneKey> hotZones, long now) {
         Set<ZoneKey> hotNow = new HashSet<>(hotZones);
         ZoneReuseModel reuse = this.reuseModel;
@@ -159,9 +168,21 @@ public class ZoneDormancyMap {
     }
 
     private static Collection<ZoneKey> collectHotPlayerZones() {
+        return hotZonesForPlayers(Universe.get().getPlayers());
+    }
+
+    /**
+     * Hot zones for the given players, tagged with each player's world. Reads transforms, so the
+     * runtime calls this per world (inside a {@code WorldDispatch.run}) and aggregates the results
+     * before running the (pure) dormancy state machine in {@link #refreshFromPlayerZones}.
+     */
+    public static List<ZoneKey> hotZonesForPlayers(Collection<PlayerRef> players) {
         List<ZoneKey> hot = new ArrayList<>();
-        for (PlayerRef ref : Universe.get().getPlayers()) {
-            if (!ref.isValid()) {
+        if (players == null) {
+            return hot;
+        }
+        for (PlayerRef ref : players) {
+            if (ref == null || !ref.isValid()) {
                 continue;
             }
             Transform t = ref.getTransform();
@@ -212,7 +233,7 @@ public class ZoneDormancyMap {
 
     public List<ZoneHeatmapEntry> heatmapEntries(int limit) {
         int cap = Math.max(1, limit);
-        List<double[]> playerXZ = playerPositions();
+        List<PlayerPos> playerXZ = playerPositions();
         List<ZoneHeatmapEntry> rows = new ArrayList<>();
         for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
             ZoneKey key = entry.getKey();
@@ -275,7 +296,7 @@ public class ZoneDormancyMap {
 
     /** LITE: DORMANT candidates from WATCH+; STANDARD uses TIGHT+. */
     public List<ZoneKey> unloadCandidateZones(MemoryTier tier, MemoryTier minDormantUnloadTier) {
-        List<double[]> playerXZ = playerPositions();
+        List<PlayerPos> playerXZ = playerPositions();
         if (playerXZ.isEmpty()) {
             return List.of();
         }
@@ -300,7 +321,7 @@ public class ZoneDormancyMap {
             return 0;
         }
 
-        List<double[]> playerXZ = playerPositions();
+        List<PlayerPos> playerXZ = playerPositions();
         if (playerXZ.isEmpty()) {
             return 0;
         }
@@ -325,7 +346,7 @@ public class ZoneDormancyMap {
      * Eviction priority (higher = evict first): far zones unlikely to be revisited rank highest.
      * When the reuse model is off, this collapses to plain distance so behaviour is unchanged.
      */
-    double evictionPriority(ZoneKey key, List<double[]> playerXZ, long nowMs) {
+    double evictionPriority(ZoneKey key, List<PlayerPos> playerXZ, long nowMs) {
         double distance = minDistanceToPlayers(key, playerXZ);
         ZoneReuseModel reuse = this.reuseModel;
         if (!config.zoneReuseModelEnabled || reuse == null) {
@@ -382,11 +403,11 @@ public class ZoneDormancyMap {
         return sb.toString();
     }
 
-    private List<double[]> playerPositions() {
+    private List<PlayerPos> playerPositions() {
         PredictedPositionSource source = this.positionSource;
         boolean usePredicted = config.motionModelEnabled && source != null;
         long horizonMs = Math.max(0, config.motionPredictionHorizonSeconds) * 1000L;
-        List<double[]> out = new ArrayList<>();
+        List<PlayerPos> out = new ArrayList<>();
         for (PlayerRef ref : Universe.get().getPlayers()) {
             if (!ref.isValid()) {
                 continue;
@@ -395,26 +416,39 @@ public class ZoneDormancyMap {
             if (t == null || t.getPosition() == null) {
                 continue;
             }
+            java.util.UUID worldUuid = ref.getWorldUuid();
             if (usePredicted) {
                 double[] predicted = source.predictedXZ(ref.getUuid(), horizonMs);
                 if (predicted != null) {
-                    out.add(predicted);
+                    out.add(new PlayerPos(worldUuid, predicted[0], predicted[1]));
                     continue;
                 }
             }
-            out.add(new double[]{t.getPosition().x, t.getPosition().z});
+            out.add(new PlayerPos(worldUuid, t.getPosition().x, t.getPosition().z));
         }
         return out;
     }
 
-    static double minDistanceToPlayers(ZoneKey key, List<double[]> playerXZ) {
+    /**
+     * Closest same-world player to the zone center. Players in other worlds are ignored, so a
+     * zone is never "protected" by someone in a different world (and a world with no players
+     * online ranks as MAX_VALUE, i.e. evict-first).
+     */
+    static double minDistanceToPlayers(ZoneKey key, List<PlayerPos> playerXZ) {
         double cx = zoneCenterBlock(key.regionX());
         double cz = zoneCenterBlock(key.regionZ());
         double min = Double.MAX_VALUE;
-        for (double[] p : playerXZ) {
-            min = Math.min(min, Math.hypot(cx - p[0], cz - p[1]));
+        for (PlayerPos p : playerXZ) {
+            if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
+                continue;
+            }
+            min = Math.min(min, Math.hypot(cx - p.x(), cz - p.z()));
         }
         return min;
+    }
+
+    /** Player position tagged with its world, so distance ranking stays world-isolated. */
+    record PlayerPos(java.util.UUID world, double x, double z) {
     }
 
     private static double zoneCenterBlock(int region) {

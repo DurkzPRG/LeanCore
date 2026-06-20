@@ -10,14 +10,19 @@ import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemorySnapshot;
 import com.durkz.leancore.permissions.LeanCorePermissions;
 import com.durkz.leancore.runtime.MemoryRuntime;
+import com.durkz.leancore.runtime.WorldDispatch;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -108,7 +113,9 @@ public class MemoryHudService {
         GovernorStatus gov = runtime.governorStatus();
         ZoneDormancyMap dormancy = runtime.dormancyMap();
         Map<UUID, RetentionDemand> demands = runtime.classifier().snapshotDemands(nowMs);
+        Map<UUID, PlayerFeatureState> features = runtime.classifier().features().snapshot();
 
+        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
         for (PlayerRef ref : Universe.get().getPlayers()) {
             if (!ref.isValid() || !sessions.isEnabled(ref.getUuid())) {
                 continue;
@@ -118,17 +125,56 @@ public class MemoryHudService {
                 active.remove(ref.getUuid());
                 continue;
             }
-            LeanCoreStatusHud hud = active.get(ref.getUuid());
-            if (hud == null) {
+            if (active.get(ref.getUuid()) == null) {
                 continue;
             }
-            RetentionDemand demand = demands.getOrDefault(ref.getUuid(), runtime.learningStore().demandFor(ref.getUuid()));
-            ZoneState localZone = localZoneState(ref, dormancy);
-            PlayerFeatureState features = runtime.classifier().features().snapshot().get(ref.getUuid());
-            String line2 = formatLine2(gov, demand, localZone) + formatReuseSuffix(ref, dormancy);
-            hud.setLines(formatLine1(sample), line2, formatMotionLine(features));
-            hud.pushUpdate();
+            UUID worldUuid = ref.getWorldUuid();
+            if (worldUuid == null) {
+                continue;
+            }
+            World world = Universe.get().getWorld(worldUuid);
+            if (world == null || !world.isAlive()) {
+                continue;
+            }
+            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(ref);
         }
+
+        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
+            World world = Universe.get().getWorld(entry.getKey());
+            if (world == null || !world.isAlive()) {
+                continue;
+            }
+            List<PlayerRef> batch = List.copyOf(entry.getValue());
+            WorldDispatch.run(world, () -> {
+                for (PlayerRef ref : batch) {
+                    renderHud(ref, sample, gov, dormancy, demands, features, runtime);
+                }
+            });
+        }
+    }
+
+    private void renderHud(
+            PlayerRef ref,
+            MemorySnapshot sample,
+            GovernorStatus gov,
+            ZoneDormancyMap dormancy,
+            Map<UUID, RetentionDemand> demands,
+            Map<UUID, PlayerFeatureState> featureSnapshot,
+            MemoryRuntime runtime
+    ) {
+        if (ref == null || !ref.isValid()) {
+            return;
+        }
+        LeanCoreStatusHud hud = active.get(ref.getUuid());
+        if (hud == null) {
+            return;
+        }
+        RetentionDemand demand = demands.getOrDefault(ref.getUuid(), runtime.learningStore().demandFor(ref.getUuid()));
+        ZoneState localZone = localZoneState(ref, dormancy);
+        PlayerFeatureState features = featureSnapshot.get(ref.getUuid());
+        String line2 = formatLine2(gov, demand, localZone) + formatReuseSuffix(ref, dormancy);
+        hud.setLines(formatLine1(sample), line2, formatMotionLine(features));
+        hud.pushUpdate();
     }
 
     private String formatMotionLine(PlayerFeatureState features) {

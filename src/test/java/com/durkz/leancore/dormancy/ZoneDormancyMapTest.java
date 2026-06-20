@@ -73,15 +73,50 @@ class ZoneDormancyMapTest {
         ZoneKey behind = new ZoneKey(WORLD, -2, 0);
 
         // Player at origin: the zone behind is physically closer than the zone ahead.
-        List<double[]> current = List.of(new double[]{0.0D, 0.0D});
+        List<ZoneDormancyMap.PlayerPos> current = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D));
         assertTrue(ZoneDormancyMap.minDistanceToPlayers(behind, current)
                 < ZoneDormancyMap.minDistanceToPlayers(ahead, current));
 
         // With the predicted position shifted forward (+x), the zone behind becomes the farthest,
         // so it ranks first for unload while the zone ahead is protected.
-        List<double[]> predicted = List.of(new double[]{200.0D, 0.0D});
+        List<ZoneDormancyMap.PlayerPos> predicted = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 200.0D, 0.0D));
         assertTrue(ZoneDormancyMap.minDistanceToPlayers(behind, predicted)
                 > ZoneDormancyMap.minDistanceToPlayers(ahead, predicted));
+    }
+
+    @Test
+    void distanceIgnoresPlayersInOtherWorlds() {
+        UUID worldB = UUID.randomUUID();
+        ZoneKey zoneInA = new ZoneKey(WORLD, 0, 0);
+
+        // Player sitting on the zone center but in a different world must not protect it.
+        List<ZoneDormancyMap.PlayerPos> otherWorld =
+                List.of(new ZoneDormancyMap.PlayerPos(worldB, 0.0D, 0.0D));
+        assertEquals(Double.MAX_VALUE, ZoneDormancyMap.minDistanceToPlayers(zoneInA, otherWorld));
+
+        // Same coords, same world -> finite distance (protected).
+        List<ZoneDormancyMap.PlayerPos> sameWorld =
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D));
+        assertTrue(ZoneDormancyMap.minDistanceToPlayers(zoneInA, sameWorld) < Double.MAX_VALUE);
+    }
+
+    @Test
+    void emptyWorldZoneEvictsBeforeOccupiedWorldZone() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.zoneReuseModelEnabled = false;
+        ZoneDormancyMap map = new ZoneDormancyMap(config);
+
+        UUID emptyWorld = UUID.randomUUID();
+        ZoneKey occupiedWorldZone = new ZoneKey(WORLD, 10, 0);
+        ZoneKey emptyWorldZone = new ZoneKey(emptyWorld, 0, 0);
+
+        // Only WORLD has a player online; emptyWorld has nobody.
+        List<ZoneDormancyMap.PlayerPos> players =
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 160.0D, 0.0D));
+
+        assertTrue(map.evictionPriority(emptyWorldZone, players, 1_000L)
+                        > map.evictionPriority(occupiedWorldZone, players, 1_000L),
+                "a zone in a world with no players online ranks first for eviction");
     }
 
     @Test
@@ -101,7 +136,7 @@ class ZoneDormancyMapTest {
         long evalTime = t - 30_000L;
         model.noteHot(rareNear, evalTime);
 
-        List<double[]> players = List.of(new double[]{0.0D, 0.0D});
+        List<ZoneDormancyMap.PlayerPos> players = List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D));
 
         config.zoneReuseModelEnabled = false;
         assertTrue(map.evictionPriority(frequentFar, players, evalTime)
