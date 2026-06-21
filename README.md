@@ -12,20 +12,25 @@ On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK ch
   <img src="https://durkzprgmods.pages.dev/images/leancore-banner-800.png" alt="LeanCore server memory governor" width="672" />
 </p>
 
+Requires Hytale server **>=0.5.6**.
+
 ## What it does
 
 - Optional heap governor with COMFORT / WATCH / TIGHT / CRITICAL tiers and rollback
 - Zone dormancy: WARM, DORMANT, FROZEN based on player proximity and idle time
+- Predictive zone retention (1.6+): a per-player motion model biases unload away from where players are heading and never evicts zones inside the current or predicted view
+- Reuse-distance + survival model (1.6+): learns which zones get revisited and scales dormancy thresholds per zone
 - Per-player retention weights from activity and a learned demand model
 - Activity Sense (1.2+): online classifier for mining, chopping, farming, building, crafting, combat
 - Runtime profiles: `LITE` (solo), `STANDARD` (friends), `FULL` (dedicated)
+- Always-on session diagnostics: startup/shutdown summaries and decision logs explain what the mod did and why (`diagnosticLogEnabled`)
 - Staff tools: `/leancore` commands, heatmap, optional HUD
 
 ## Runtime profiles
 
-| Players | Profile | Tick | Notes (1.5.0) |
+| Players | Profile | Tick | Notes (1.6.0) |
 |---------|---------|------|-----------------|
-| 1 (solo local) | `LITE` | 30s (60s idle) | Lite governor, adaptive view, AFK unload, lite learning |
+| 1 (solo local) | `LITE` | 30s (60s idle) | Lite governor, adaptive view, AFK unload, lite learning, motion-aware retention |
 | 1 + `embeddedStandardProfile` | `STANDARD` | 15s | Dev dogfood of govern/learning without FULL |
 | 2-8 (friends) | `STANDARD` | 15s | Classifier; govern/learning/HUD if enabled |
 | 9+ (dense local) | `FULL` | 5s | Full runtime per config |
@@ -33,9 +38,9 @@ On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK ch
 
 Default: `localHostMode: "AUTO"`. Use `"PASSIVE"` to disable background ticks. Set `dedicatedServerMode: true` on a dedicated host.
 
-Boot log: `LeanCore 1.5.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
+Boot log: `LeanCore 1.6.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
 
-### LITE profile (1.5.0)
+### LITE profile (1.6.0)
 
 Solo embedded gets a real memory governor without switching to STANDARD. STANDARD/FULL unchanged.
 
@@ -51,9 +56,9 @@ STANDARD/FULL: view-radius and chunk unload still require `governEnabled` / `lea
 
 ## Install
 
-1. Download **LeanCore-1.5.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+1. Download **LeanCore-1.6.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Put the JAR in your world's `mods/` folder (or `%AppData%\Hytale\UserData\Mods\` on Windows)
-3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.5.0 defaults)
+3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.6.0 defaults)
 4. Run `/leancore probe` before enabling policy unload
 5. Run `/leancore status` after about a minute
 
@@ -92,7 +97,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `unloadEnabled` | `false` | STANDARD/FULL policy chunk unload (after `/leancore probe`) |
 | `gcHintEnabled` | `false` | Experimental LITE idle GC nudge; metrics in `/leancore savings` |
 
-### LITE keys (1.5.0)
+### LITE keys (1.6.0)
 
 | Key | Default | Notes |
 |-----|---------|-------|
@@ -102,6 +107,15 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `liteViewPressureThreshold` | `0.85` | COMFORT cap when chunk saturation high |
 | `liteUnloadEnabled` | `true` | AFK reclaim; still needs probe |
 | `liteUnloadIdleSeconds` | `180` | Idle before unload sweeps |
+
+### Motion & retention keys (1.6.0)
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `motionModelEnabled` | `true` | Per-player velocity model; biases unload toward where players go |
+| `zoneReuseModelEnabled` | `true` | Reuse-distance + survival model; scales dormancy per zone |
+| `motionViewRadiusBoostEnabled` | `false` | Opt-in cinematic view boost for fast movers; off because rewriting view radius each tick churns chunk loading on the current engine |
+| `diagnosticLogEnabled` | `true` | Always-on `[diag]` session/decision logs; set `false` to silence |
 
 Learning snapshot: `mods/durkz_LeanCore/learning.state.gz` (schema v8, gzip binary). Legacy `learning.state` is migrated on first flush.
 
@@ -121,13 +135,13 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 ./gradlew build
 ```
 
-Output: `build/libs/LeanCore-1.5.0.jar`
+Output: `build/libs/LeanCore-1.6.0.jar`
 
 **Local deploy (DurkzPRG):** copy the built JAR to:
 
 `%AppData%\Hytale\UserData\Mods\`
 
-Example (Windows): `Copy-Item build\libs\LeanCore-1.5.0.jar $env:APPDATA\Hytale\UserData\Mods\`
+Example (Windows): `Copy-Item build\libs\LeanCore-1.6.0.jar $env:APPDATA\Hytale\UserData\Mods\`
 
 ## Links
 
