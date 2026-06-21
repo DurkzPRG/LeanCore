@@ -118,10 +118,12 @@ public class LeanCoreConfig {
     public int liteUnloadMaxChunksPerSweep = 8;
 
     // v1.6.0 Frente 1: motion model (on by default). Predicted position biases unload away
-    // from zones ahead of the player and protects the cone ahead; view-radius boost for fast movers.
+    // from zones ahead of the player and protects the cone ahead. The live view-radius boost is
+    // off by default: rewriting the client view radius every motion tick churns the chunk ring
+    // and stutters on the current engine, whose post-load pipeline is slow. Opt-in.
     public boolean motionModelEnabled = true;
     public int motionPredictionHorizonSeconds = 3;
-    public boolean motionViewRadiusBoostEnabled = true;
+    public boolean motionViewRadiusBoostEnabled = false;
     public double motionViewRadiusMaxBoost = 1.6D;
     public double motionMinSpeedBlocksPerSecond = 2.0D;
     // Fast cadence (seconds) for the live motion sampler + HUD refresh. Must stay under the
@@ -301,8 +303,8 @@ public class LeanCoreConfig {
         if (motionViewRadiusMaxBoost < 1.0D) {
             motionViewRadiusMaxBoost = 1.0D;
         }
-        if (motionViewRadiusMaxBoost > 1.5D) {
-            motionViewRadiusMaxBoost = 1.5D;
+        if (motionViewRadiusMaxBoost > 2.0D) {
+            motionViewRadiusMaxBoost = 2.0D;
         }
         if (motionMinSpeedBlocksPerSecond <= 0.0D) {
             motionMinSpeedBlocksPerSecond = 3.0D;

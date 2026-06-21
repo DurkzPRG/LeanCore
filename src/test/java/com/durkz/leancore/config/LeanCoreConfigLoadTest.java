@@ -34,6 +34,15 @@ class LeanCoreConfigLoadTest {
     }
 
     @Test
+    void tunedMotionBoostSurvivesSanitize() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.motionViewRadiusMaxBoost = 1.6D;
+        config.normalizeDefaults();
+
+        assertEquals(1.6D, config.motionViewRadiusMaxBoost, 1e-9);
+    }
+
+    @Test
     void invalidJsonFallsBackToDefaults(@TempDir Path dataDir) throws Exception {
         Files.writeString(dataDir.resolve("LeanCore.json"), "{not json", StandardCharsets.UTF_8);
 
