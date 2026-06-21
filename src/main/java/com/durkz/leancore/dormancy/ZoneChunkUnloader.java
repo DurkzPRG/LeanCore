@@ -86,8 +86,13 @@ public class ZoneChunkUnloader {
             List<ZoneKey> zones = List.copyOf(entry.getValue());
             List<ChunkTracker> trackers = collectTrackers(entry.getKey());
             int[] counter = new int[1];
-            WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
-            unloaded += counter[0];
+            // Read the counter only when the world task completed. On a timed-out dispatch the task
+            // may still be mutating counter[0] on the world thread; trusting it here would be a data
+            // race and could over-report unloads.
+            boolean done = WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
+            if (done) {
+                unloaded += counter[0];
+            }
         }
 
         lastSweepMs = nowMs;
@@ -157,8 +162,10 @@ public class ZoneChunkUnloader {
             List<ZoneKey> zones = List.copyOf(entry.getValue());
             List<ChunkTracker> trackers = collectTrackers(entry.getKey());
             int[] counter = new int[1];
-            WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
-            unloaded += counter[0];
+            boolean done = WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
+            if (done) {
+                unloaded += counter[0];
+            }
         }
 
         lastSweepMs = nowMs;

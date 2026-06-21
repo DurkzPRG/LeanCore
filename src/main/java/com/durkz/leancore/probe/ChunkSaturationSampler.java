@@ -1,9 +1,12 @@
 package com.durkz.leancore.probe;
 
+import com.durkz.leancore.runtime.WorldDispatch;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import java.util.Collection;
@@ -28,14 +31,25 @@ public final class ChunkSaturationSampler {
         }
         double maxSaturation = 0.0D;
         for (PlayerRef playerRef : players) {
-            if (playerRef == null || !playerRef.isValid()) {
+            if (playerRef == null || !playerRef.isValid() || playerRef.getWorldUuid() == null) {
                 continue;
             }
-            PlayerSpatialProbe.SpatialSample spatial = PlayerSpatialProbe.readChunks(playerRef);
-            int viewRadius = readServerViewRadius(playerRef);
-            int budget = Math.max(1, ChunkPressureModel.viewChunkBudget(viewRadius));
-            double saturation = Math.min(1.0D, (double) spatial.loadedChunks() / budget);
-            maxSaturation = Math.max(maxSaturation, saturation);
+            World world = Universe.get().getWorld(playerRef.getWorldUuid());
+            if (world == null || !world.isAlive()) {
+                continue;
+            }
+            // Chunk-tracker and Player view-radius reads need world affinity; run them on the world
+            // thread and skip this player on a timed-out dispatch.
+            double[] saturation = {0.0D};
+            boolean done = WorldDispatch.run(world, () -> {
+                PlayerSpatialProbe.SpatialSample spatial = PlayerSpatialProbe.readChunks(playerRef);
+                int viewRadius = readServerViewRadius(playerRef);
+                int budget = Math.max(1, ChunkPressureModel.viewChunkBudget(viewRadius));
+                saturation[0] = Math.min(1.0D, (double) spatial.loadedChunks() / budget);
+            });
+            if (done) {
+                maxSaturation = Math.max(maxSaturation, saturation[0]);
+            }
         }
         return maxSaturation;
     }

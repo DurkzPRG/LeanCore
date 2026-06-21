@@ -251,6 +251,11 @@ public class PlayerFeatureState {
         return motion.predictedXZ(horizonMs);
     }
 
+    /** Last (x,z) captured by {@link #samplePosition}, or {@code null} before the first sample. */
+    public synchronized double[] lastSampledXZ() {
+        return positioned ? new double[]{lastX, lastZ} : null;
+    }
+
     public synchronized double speedBlocksPerSec() {
         return motion.speedBlocksPerSec();
     }

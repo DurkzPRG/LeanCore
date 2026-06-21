@@ -32,8 +32,13 @@ public final class LeanCorePermissions {
         return inAnyGroup(uuid, config.hudViewerGroups) || inAnyGroup(uuid, config.hudAdminGroups);
     }
 
-    public static boolean canAdminHud(UUID uuid, LeanCoreConfig config) {
-        if (uuid == null || config == null || !config.hudFeatureEnabled) {
+    /**
+     * Admin gate for operator tooling (heatmap, zone pins). Intentionally independent of
+     * {@code hudFeatureEnabled}: those commands diagnose the dormancy map, not the HUD, and must
+     * stay usable when the HUD is off (its default).
+     */
+    public static boolean canAdminLeanCore(UUID uuid, LeanCoreConfig config) {
+        if (uuid == null || config == null) {
             return false;
         }
         if (hasPermission(uuid, HUD_ADMIN)) {

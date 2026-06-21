@@ -1,13 +1,13 @@
 package com.durkz.leancore.runtime;
 
 import com.durkz.leancore.config.LeanCoreConfig;
-import com.hypixel.hytale.math.vector.Transform;
-import com.hypixel.hytale.server.core.universe.PlayerRef;
-import com.hypixel.hytale.server.core.universe.Universe;
 
 /**
  * LITE profile optimizations for embedded solo worlds: motion-gated dormancy,
  * throttled heap samples, and adaptive tick when the player is idle.
+ *
+ * <p>Position-based decisions take the (x,z) the motion sampler captured on the world thread, so
+ * this class never reads a {@code PlayerRef} transform off the world thread.
  */
 public final class SoloRuntimePolicy {
 
@@ -20,26 +20,22 @@ public final class SoloRuntimePolicy {
             double lastZ,
             boolean positioned,
             long nowMs,
-            long lastDormancyRefreshMs
+            long lastDormancyRefreshMs,
+            double[] currentXZ
     ) {
         long minIntervalMs = Math.max(30_000L, config.soloDormancyMinIntervalSeconds * 1000L);
         if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= minIntervalMs) {
             return true;
         }
 
-        PlayerRef player = firstOnlinePlayer();
-        if (player == null) {
-            return false;
-        }
-        Transform t = player.getTransform();
-        if (t == null || t.getPosition() == null) {
+        if (currentXZ == null) {
             return false;
         }
         if (!positioned) {
             return true;
         }
-        double dx = t.getPosition().x - lastX;
-        double dz = t.getPosition().z - lastZ;
+        double dx = currentXZ[0] - lastX;
+        double dz = currentXZ[1] - lastZ;
         return Math.hypot(dx, dz) >= Math.max(1.0D, config.soloDormancyMotionBlocks);
     }
 
@@ -63,25 +59,11 @@ public final class SoloRuntimePolicy {
         return base;
     }
 
-    public static PlayerMotionSnapshot captureMotion() {
-        PlayerRef player = firstOnlinePlayer();
-        if (player == null) {
+    public static PlayerMotionSnapshot captureMotion(double[] currentXZ) {
+        if (currentXZ == null) {
             return PlayerMotionSnapshot.empty();
         }
-        Transform t = player.getTransform();
-        if (t == null || t.getPosition() == null) {
-            return PlayerMotionSnapshot.empty();
-        }
-        return new PlayerMotionSnapshot(t.getPosition().x, t.getPosition().z, true);
-    }
-
-    private static PlayerRef firstOnlinePlayer() {
-        for (PlayerRef ref : Universe.get().getPlayers()) {
-            if (ref != null && ref.isValid()) {
-                return ref;
-            }
-        }
-        return null;
+        return new PlayerMotionSnapshot(currentXZ[0], currentXZ[1], true);
     }
 
     public record PlayerMotionSnapshot(double x, double z, boolean positioned) {

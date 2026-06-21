@@ -1,5 +1,6 @@
 package com.durkz.leancore.probe;
 
+import com.durkz.leancore.runtime.WorldDispatch;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -45,8 +46,15 @@ public final class RegionalPressureCache {
             if (world == null) {
                 continue;
             }
-            RegionalEntityProbe.RegionalEntitySample sample = RegionalEntityProbe.read(ref, world);
-            if (sample.zone() == null) {
+            // RegionalEntityProbe reads the world's chunk store, so run it on the world thread and
+            // skip this player on a timed-out dispatch.
+            RegionalEntityProbe.RegionalEntitySample[] holder = new RegionalEntityProbe.RegionalEntitySample[1];
+            boolean done = WorldDispatch.run(world, () -> holder[0] = RegionalEntityProbe.read(ref, world));
+            if (!done) {
+                continue;
+            }
+            RegionalEntityProbe.RegionalEntitySample sample = holder[0];
+            if (sample == null || sample.zone() == null) {
                 continue;
             }
             if (best == null || sample.regionalEntities() > best.regionalEntities()) {

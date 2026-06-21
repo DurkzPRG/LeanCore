@@ -70,6 +70,12 @@ public class PlayerFeatureTracker implements ViewRadiusCache, PredictedPositionS
     }
 
     @Override
+    public double[] currentXZ(UUID playerId) {
+        PlayerFeatureState state = states.get(playerId);
+        return state == null ? null : state.lastSampledXZ();
+    }
+
+    @Override
     public int viewRadiusChunks(UUID playerId) {
         PlayerFeatureState state = states.get(playerId);
         return state == null ? -1 : state.effectiveViewRadius();

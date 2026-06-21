@@ -1,6 +1,6 @@
 package com.durkz.leancore.memory;
 
-import com.hypixel.hytale.math.vector.Transform;
+import com.durkz.leancore.dormancy.PredictedPositionSource;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 
@@ -12,6 +12,7 @@ public class MemoryPressureSensor {
 
     private final ServerContextTracker serverContext;
     private final SessionSavingsTracker sessionSavings;
+    private volatile PredictedPositionSource positions;
 
     public MemoryPressureSensor(ServerContextTracker serverContext) {
         this(serverContext, null);
@@ -20,6 +21,14 @@ public class MemoryPressureSensor {
     public MemoryPressureSensor(ServerContextTracker serverContext, SessionSavingsTracker sessionSavings) {
         this.serverContext = serverContext;
         this.sessionSavings = sessionSavings;
+    }
+
+    /**
+     * Wires the on-world motion sample used for player spread. Without it (passive heap sensors)
+     * spread is reported as zero rather than read off the world thread.
+     */
+    public void setPositionSource(PredictedPositionSource positions) {
+        this.positions = positions;
     }
 
     public MemorySnapshot sample() {
@@ -47,21 +56,25 @@ public class MemoryPressureSensor {
         return new MemorySnapshot(used, max, ratio, players.size(), maxPairwiseSpread(players), tier);
     }
 
-    private static double maxPairwiseSpread(Collection<PlayerRef> players) {
-        if (players.size() < 2) {
+    /**
+     * Largest pairwise distance between online players, from the motion sampler's on-world (x,z)
+     * snapshot (identity reads only here, no transform). Returns zero when no source is wired.
+     */
+    private double maxPairwiseSpread(Collection<PlayerRef> players) {
+        PredictedPositionSource source = this.positions;
+        if (source == null || players.size() < 2) {
             return 0.0D;
         }
 
         List<double[]> xz = new ArrayList<>(players.size());
         for (PlayerRef ref : players) {
-            if (!ref.isValid()) {
+            if (ref == null || !ref.isValid()) {
                 continue;
             }
-            Transform t = ref.getTransform();
-            if (t == null || t.getPosition() == null) {
-                continue;
+            double[] pos = source.currentXZ(ref.getUuid());
+            if (pos != null) {
+                xz.add(pos);
             }
-            xz.add(new double[]{t.getPosition().x, t.getPosition().z});
         }
         if (xz.size() < 2) {
             return 0.0D;

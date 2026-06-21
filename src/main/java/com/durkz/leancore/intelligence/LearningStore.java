@@ -595,16 +595,6 @@ public class LearningStore {
         }
     }
 
-    private void writeActivityModel(Properties props) {
-        props.setProperty("activity.updates", Integer.toString(activityClassifier.updates()));
-        double[][] weights = activityClassifier.weights();
-        for (int c = 0; c < weights.length; c++) {
-            for (int i = 0; i < ActivityFeatureEncoder.DIM; i++) {
-                props.setProperty("activity.w." + c + "." + i, Double.toString(weights[c][i]));
-            }
-        }
-    }
-
     private void loadActivityModel(Properties props) {
         int classes = PlayerBehavior.values().length;
         double[][] weights = new double[classes][ActivityFeatureEncoder.DIM];
@@ -683,12 +673,6 @@ public class LearningStore {
         }
     }
 
-    private void writeBlacklist(Properties props, long nowMs) {
-        for (Map.Entry<String, Long> entry : policyBlacklist.snapshotActive(nowMs).entrySet()) {
-            props.setProperty("blacklist." + entry.getKey() + ".untilMs", Long.toString(entry.getValue()));
-        }
-    }
-
     private void loadBlacklist(Properties props, long nowMs) {
         Map<String, Long> entries = new java.util.HashMap<>();
         for (String key : props.stringPropertyNames()) {
@@ -706,45 +690,6 @@ public class LearningStore {
             }
         }
         policyBlacklist.hydrate(entries, nowMs);
-    }
-
-    private void writeBandit(Properties props) {
-        for (Map.Entry<String, PolicyBandit.ArmState> e : policyBandit.arms().entrySet()) {
-            String prefix = "bandit." + e.getKey() + ".";
-            PolicyBandit.ArmState arm = e.getValue();
-            props.setProperty(prefix + "pulls", Integer.toString(arm.pulls));
-            props.setProperty(prefix + "rewardSum", Double.toString(arm.rewardSum));
-            for (int i = 0; i < PolicyBandit.CONTEXT_DIM; i++) {
-                props.setProperty(prefix + "a." + i, Double.toString(arm.aDiag[i]));
-                props.setProperty(prefix + "b." + i, Double.toString(arm.b[i]));
-            }
-        }
-    }
-
-    private static void writePlayer(Properties props, UUID id, PersistedPlayer player) {
-        String prefix = "player." + id + ".";
-        props.setProperty(prefix + "demand", Double.toString(player.demand));
-        props.setProperty(prefix + "confidence", Double.toString(player.confidence));
-        props.setProperty(prefix + "retentionMb", Integer.toString(player.retentionMb));
-        props.setProperty(prefix + "label", player.debugLabel.name());
-        props.setProperty(prefix + "movement60", Double.toString(player.movement60));
-        props.setProperty(prefix + "breaks60", Double.toString(player.breaks60));
-        props.setProperty(prefix + "places60", Double.toString(player.places60));
-        props.setProperty(prefix + "zones60", Double.toString(player.zones60));
-        props.setProperty(prefix + "movement15m", Double.toString(player.movement15m));
-        props.setProperty(prefix + "breaks15m", Double.toString(player.breaks15m));
-        props.setProperty(prefix + "places15m", Double.toString(player.places15m));
-        props.setProperty(prefix + "zones15m", Double.toString(player.zones15m));
-        props.setProperty(prefix + "chunks60", Double.toString(player.chunks60));
-        props.setProperty(prefix + "chunks15m", Double.toString(player.chunks15m));
-        props.setProperty(prefix + "mine60", Double.toString(player.mine60));
-        props.setProperty(prefix + "wood60", Double.toString(player.wood60));
-        props.setProperty(prefix + "farm60", Double.toString(player.farm60));
-        props.setProperty(prefix + "build60", Double.toString(player.build60));
-        props.setProperty(prefix + "craft60", Double.toString(player.craft60));
-        props.setProperty(prefix + "combat60", Double.toString(player.combat60));
-        props.setProperty(prefix + "holdout", Boolean.toString(HoldoutSet.isHoldout(id)));
-        props.setProperty(prefix + "observedSec", Long.toString(player.observedSec));
     }
 
     private static double readDouble(Properties props, String key, double fallback) {
@@ -781,10 +726,6 @@ public class LearningStore {
         } catch (NumberFormatException ignored) {
             return fallback;
         }
-    }
-
-    private static String formatRatio(double ratio) {
-        return String.format(Locale.ROOT, "%.4f", ratio);
     }
 
     private record PersistedPlayer(

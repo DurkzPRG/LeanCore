@@ -105,7 +105,10 @@ public class PolicyApplier {
             if (!RuntimeGuard.active()) {
                 continue;
             }
-            WorldDispatch.run(world, () -> {
+            // Only credit the batch (and advance the apply throttle below) when the world task
+            // actually ran. A timed-out dispatch leaves view radii untouched, so claiming success
+            // would wedge lastAppliedPolicyKey and suppress the retry next tick.
+            boolean done = WorldDispatch.run(world, () -> {
                 if (!RuntimeGuard.active()) {
                     return;
                 }
@@ -113,7 +116,9 @@ public class PolicyApplier {
                     applyOne(item.playerRef(), policy, item.demand(), profile);
                 }
             });
-            scheduled += batch.size();
+            if (done) {
+                scheduled += batch.size();
+            }
         }
 
         if (scheduled > 0) {

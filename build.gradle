@@ -75,21 +75,36 @@ if (!serverRunDir.exists()) {
     serverRunDir.mkdirs()
 }
 
+// Version-stamp the manifest into a generated dir; the source manifest.json is treated as a
+// template and never rewritten, so the build stays hermetic (no dirty working tree after a build).
+def generatedManifestDir = layout.buildDirectory.dir('generated/manifest')
+
+sourceSets.main.resources.exclude('manifest.json')
+
 tasks.register('updatePluginManifest') {
-    def manifestFile = file('src/main/resources/manifest.json')
+    def sourceManifest = file('src/main/resources/manifest.json')
+    def outputDir = generatedManifestDir
+    inputs.file(sourceManifest)
+    inputs.property('version', version)
+    inputs.property('includesPack', includes_pack)
+    outputs.dir(outputDir)
     doLast {
-        if (!manifestFile.exists()) {
-            throw new org.gradle.api.GradleException("Could not find manifest.json at ${manifestFile.path}!")
+        if (!sourceManifest.exists()) {
+            throw new org.gradle.api.GradleException("Could not find manifest.json at ${sourceManifest.path}!")
         }
-        def manifestJson = new groovy.json.JsonSlurper().parseText(manifestFile.text)
+        def manifestJson = new groovy.json.JsonSlurper().parseText(sourceManifest.text)
         manifestJson.Version = version
         manifestJson.IncludesAssetPack = includes_pack.toBoolean()
-        manifestFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifestJson))
+        def dir = outputDir.get().asFile
+        dir.mkdirs()
+        new File(dir, 'manifest.json').text =
+                groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifestJson))
     }
 }
 
 tasks.named('processResources') {
     dependsOn 'updatePluginManifest'
+    from(generatedManifestDir)
 }
 
 def createServerRunArguments(String srcDir) {

@@ -480,7 +480,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 return;
             }
             LeanCoreConfig config = plugin.config();
-            if (!LeanCorePermissions.canAdminHud(playerRef.getUuid(), config)) {
+            if (!LeanCorePermissions.canAdminLeanCore(playerRef.getUuid(), config)) {
                 say(ctx, "no permission for heatmap", "#FF8888");
                 return;
             }
@@ -541,7 +541,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             if (rt == null || plugin == null) {
                 return;
             }
-            if (!LeanCorePermissions.canAdminHud(playerRef.getUuid(), plugin.config())) {
+            if (!LeanCorePermissions.canAdminLeanCore(playerRef.getUuid(), plugin.config())) {
                 say(ctx, "no permission for zone pin", "#FF8888");
                 return;
             }
@@ -573,7 +573,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             if (rt == null || plugin == null) {
                 return;
             }
-            if (!LeanCorePermissions.canAdminHud(playerRef.getUuid(), plugin.config())) {
+            if (!LeanCorePermissions.canAdminLeanCore(playerRef.getUuid(), plugin.config())) {
                 say(ctx, "no permission for zone unpin", "#FF8888");
                 return;
             }
@@ -605,7 +605,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             if (rt == null || plugin == null) {
                 return;
             }
-            if (!LeanCorePermissions.canAdminHud(playerRef.getUuid(), plugin.config())) {
+            if (!LeanCorePermissions.canAdminLeanCore(playerRef.getUuid(), plugin.config())) {
                 say(ctx, "no permission for zone pins", "#FF8888");
                 return;
             }

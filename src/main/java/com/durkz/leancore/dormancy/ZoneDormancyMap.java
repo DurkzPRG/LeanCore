@@ -39,10 +39,6 @@ public class ZoneDormancyMap {
         this.reuseModel = model;
     }
 
-    public void refreshFromPlayers() {
-        refreshFromPlayerZones(collectHotPlayerZones(), System.currentTimeMillis());
-    }
-
     /**
      * Runs the dormancy state machine from a pre-collected set of hot zones. The runtime gathers
      * hot zones per world (each on its own world thread) and calls this once on the scheduler
@@ -167,10 +163,6 @@ public class ZoneDormancyMap {
         });
     }
 
-    private static Collection<ZoneKey> collectHotPlayerZones() {
-        return hotZonesForPlayers(Universe.get().getPlayers());
-    }
-
     /**
      * Hot zones for the given players, tagged with each player's world. Reads transforms, so the
      * runtime calls this per world (inside a {@code WorldDispatch.run}) and aggregates the results
@@ -280,13 +272,6 @@ public class ZoneDormancyMap {
                 .sorted(Comparator.comparingInt(e -> -e.getValue().ordinal()))
                 .limit(limit)
                 .map(e -> e.getKey() + "=" + e.getValue())
-                .collect(Collectors.toList());
-    }
-
-    public Collection<ZoneKey> hotZones() {
-        return zones.entrySet().stream()
-                .filter(e -> e.getValue() == ZoneState.HOT)
-                .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
     }
 
@@ -405,9 +390,18 @@ public class ZoneDormancyMap {
         return sb.toString();
     }
 
+    /**
+     * Player anchor points for distance/protection math. Positions come from the motion sampler
+     * (captured on each world thread), not a live transform read, so this stays safe to call from
+     * the scheduler thread. Without a position source there is nothing to protect, so it returns
+     * empty and the caller produces no unload candidates.
+     */
     private List<PlayerPos> playerPositions() {
         PredictedPositionSource source = this.positionSource;
-        boolean usePredicted = config.motionModelEnabled && source != null;
+        if (source == null) {
+            return List.of();
+        }
+        boolean usePredicted = config.motionModelEnabled;
         long horizonMs = Math.max(0, config.motionPredictionHorizonSeconds) * 1000L;
         double fallbackViewBlocks = Math.max(1, config.maxClientViewRadius) * 16.0D;
         List<PlayerPos> out = new ArrayList<>();
@@ -415,22 +409,21 @@ public class ZoneDormancyMap {
             if (!ref.isValid()) {
                 continue;
             }
-            Transform t = ref.getTransform();
-            if (t == null || t.getPosition() == null) {
+            java.util.UUID playerId = ref.getUuid();
+            double[] xz = source.currentXZ(playerId);
+            if (xz == null) {
                 continue;
             }
             java.util.UUID worldUuid = ref.getWorldUuid();
             double viewBlocks = fallbackViewBlocks;
-            if (source != null) {
-                int chunks = source.viewRadiusChunks(ref.getUuid());
-                if (chunks > 0) {
-                    viewBlocks = chunks * 16.0D;
-                }
+            int chunks = source.viewRadiusChunks(playerId);
+            if (chunks > 0) {
+                viewBlocks = chunks * 16.0D;
             }
-            out.add(new PlayerPos(worldUuid, t.getPosition().x, t.getPosition().z, viewBlocks));
+            out.add(new PlayerPos(worldUuid, xz[0], xz[1], viewBlocks));
             // A predicted point protects the cone ahead too.
             if (usePredicted) {
-                double[] predicted = source.predictedXZ(ref.getUuid(), horizonMs);
+                double[] predicted = source.predictedXZ(playerId, horizonMs);
                 if (predicted != null) {
                     out.add(new PlayerPos(worldUuid, predicted[0], predicted[1], viewBlocks));
                 }

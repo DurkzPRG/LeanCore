@@ -125,6 +125,7 @@ public class MemoryRuntime {
     ) {
         SessionSavingsTracker sessionSavings = new SessionSavingsTracker();
         MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext(), sessionSavings);
+        sensor.setPositionSource(classifier.features());
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         dormancyMap.setPredictedPositionSource(classifier.features());
         dormancyMap.setZoneReuseModel(learningStore.zoneReuseModel());
@@ -671,17 +672,19 @@ public class MemoryRuntime {
         if (!online.isEmpty()) {
             samplePositionsPerWorld(batches, nowMs, false);
         }
+        double[] soloXZ = soloCurrentXZ(online);
         if (SoloRuntimePolicy.shouldRefreshDormancy(
                 config,
                 lastLiteX,
                 lastLiteZ,
                 lastLitePositioned,
                 nowMs,
-                lastDormancyRefreshMs
+                lastDormancyRefreshMs,
+                soloXZ
         )) {
             refreshDormancyPerWorld(batches, nowMs);
             lastDormancyRefreshMs = nowMs;
-            SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion();
+            SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion(soloXZ);
             lastLiteX = motion.x();
             lastLiteZ = motion.z();
             lastLitePositioned = motion.positioned();
@@ -739,6 +742,24 @@ public class MemoryRuntime {
 
     public GcHintScheduler gcHintScheduler() {
         return gcHintScheduler;
+    }
+
+    /** First online player's last on-world-sampled (x,z), or null. Identity reads only, no transform. */
+    private double[] soloCurrentXZ(Collection<PlayerRef> online) {
+        if (online == null) {
+            return null;
+        }
+        var source = classifier.features();
+        for (PlayerRef ref : online) {
+            if (ref == null || !ref.isValid()) {
+                continue;
+            }
+            double[] xz = source.currentXZ(ref.getUuid());
+            if (xz != null) {
+                return xz;
+            }
+        }
+        return null;
     }
 
     private long soloPlayerIdleSec() {
