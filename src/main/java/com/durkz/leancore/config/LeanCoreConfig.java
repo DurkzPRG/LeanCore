@@ -140,6 +140,35 @@ public class LeanCoreConfig {
     public int zoneReuseMaxPersistedZones = 4096;
     public int zoneReuseTtlDays = 30;
 
+    // v1.6.0 Frente 2 reward: a zone returning to HOT within this window after we unloaded it is
+    // counted as a false cut. The count is always tracked for observability (/leancore learn);
+    // folding it into the bandit reward is gated by zoneFalseCutRewardEnabled (off by default until
+    // validated on the holdout, per roadmap risk discipline).
+    public int zoneRevisitAfterUnloadWindowSeconds = 120;
+    public boolean zoneFalseCutRewardEnabled = false;
+
+    // v1.7.0 Frente A: per-chunk unload truth. Snapshot + diff of ChunkStore.getChunkIndexes() on
+    // the world thread counts the exact chunks the engine unloaded, instead of the net
+    // getLoadedChunksCount() delta (which cancels out simultaneous loads). Feeds the engine-unload
+    // reward in UnloadOutcomeTracker more cleanly. Requires chunkUnloadEventTracking to run at all.
+    // Off by default until validated.
+    public boolean perChunkUnloadTruthEnabled = false;
+
+    // v1.7.0 Frente B: content-aware zone demand. Samples built-content density per zone (block
+    // entities: chests, benches, infrastructure) on the world thread, keeps a persisted EMA per
+    // zone, and biases unload eviction priority + dormancy thresholds toward keeping content-rich
+    // zones HOT even when idle. Off by default until validated on the holdout.
+    public boolean zoneContentModelEnabled = false;
+    public double zoneContentRankWeight = 0.5D;
+
+    // v1.7.0 Frente C: hot/simulation radius actuator. Mirrors the view-radius governor but drives
+    // ChunkTracker.setMaxHotLoadedChunksRadius (ticking radius, separate from view radius), cutting
+    // CPU/heap of simulated chunks without the view-radius pop-in. Off by default; respects the same
+    // grace + holdout discipline as the view-radius governor.
+    public boolean hotRadiusGovernanceEnabled = false;
+    public int minHotLoadedChunksRadius = 2;
+    public int maxHotLoadedChunksRadius = 8;
+
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
     public boolean diagnosticLogEnabled = true;
@@ -351,6 +380,35 @@ public class LeanCoreConfig {
         }
         if (zoneReuseTtlDays > 365) {
             zoneReuseTtlDays = 365;
+        }
+        if (zoneRevisitAfterUnloadWindowSeconds < 0) {
+            zoneRevisitAfterUnloadWindowSeconds = 0;
+        }
+        if (zoneRevisitAfterUnloadWindowSeconds > 3600) {
+            zoneRevisitAfterUnloadWindowSeconds = 3600;
+        }
+        sanitizeZoneContentSettings();
+        sanitizeHotRadiusSettings();
+    }
+
+    private void sanitizeZoneContentSettings() {
+        if (zoneContentRankWeight < 0.0D) {
+            zoneContentRankWeight = 0.0D;
+        }
+        if (zoneContentRankWeight > 2.0D) {
+            zoneContentRankWeight = 2.0D;
+        }
+    }
+
+    private void sanitizeHotRadiusSettings() {
+        if (minHotLoadedChunksRadius < 1) {
+            minHotLoadedChunksRadius = 1;
+        }
+        if (maxHotLoadedChunksRadius > 16) {
+            maxHotLoadedChunksRadius = 16;
+        }
+        if (maxHotLoadedChunksRadius < minHotLoadedChunksRadius) {
+            maxHotLoadedChunksRadius = minHotLoadedChunksRadius;
         }
     }
 
