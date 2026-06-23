@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ZoneReuseModel {
 
     private static final double INTERVAL_BLEND = 0.4D;
+    private static final double CONTENT_BLEND = 0.3D;
     private static final double VISIT_NORM = 20.0D;
     private static final double MIN_INTERVAL_MS = 1000.0D;
     private static final double NEUTRAL_SCORE = 0.5D;
@@ -56,6 +57,30 @@ public final class ZoneReuseModel {
     public int visitCount(ZoneKey key) {
         ZoneReuseStat s = key == null ? null : stats.get(key);
         return s == null ? 0 : s.visitCount;
+    }
+
+    /**
+     * Blends a fresh content observation (v1.7.0 Frente B) into the zone's persisted content EMA.
+     * Creates a content-only entry for zones not yet visited; the reuse score still gates on
+     * {@link #MIN_VISITS_FOR_SCORE}, so a content-only entry never affects revisit math.
+     */
+    public void noteContent(ZoneKey key, double contentScore, long nowMs) {
+        if (key == null) {
+            return;
+        }
+        final double observed = FeatureNormalizer.clamp01(contentScore);
+        stats.compute(key, (k, prev) -> {
+            ZoneReuseStat stat = prev == null ? ZoneReuseStat.contentOnly(nowMs) : prev;
+            stat.applyContent(observed);
+            stat.lastSeenMs = nowMs;
+            return stat;
+        });
+    }
+
+    /** Persisted content score in [0,1] for the zone, or 0 (none/unknown) when untracked. */
+    public double contentScore(ZoneKey key) {
+        ZoneReuseStat s = key == null ? null : stats.get(key);
+        return s == null ? 0.0D : s.contentScore;
     }
 
     public int size() {
@@ -97,7 +122,7 @@ public final class ZoneReuseModel {
             }
             ZoneKey k = e.getKey();
             out.add(new Record(k.worldUuid(), k.regionX(), k.regionZ(),
-                    s.visitCount, s.lastHotAtMs, s.emaIntervalMs, s.lastSeenMs));
+                    s.visitCount, s.lastHotAtMs, s.emaIntervalMs, s.lastSeenMs, s.contentScore));
         }
         return out;
     }
@@ -107,7 +132,8 @@ public final class ZoneReuseModel {
             return;
         }
         stats.put(new ZoneKey(r.worldUuid(), r.regionX(), r.regionZ()),
-                ZoneReuseStat.restore(r.visitCount(), r.lastHotAtMs(), r.emaIntervalMs(), r.lastSeenMs()));
+                ZoneReuseStat.restore(r.visitCount(), r.lastHotAtMs(), r.emaIntervalMs(),
+                        r.lastSeenMs(), r.contentScore()));
     }
 
     public void clear() {
@@ -115,7 +141,8 @@ public final class ZoneReuseModel {
     }
 
     public record Record(UUID worldUuid, int regionX, int regionZ,
-                          int visitCount, long lastHotAtMs, double emaIntervalMs, long lastSeenMs) {
+                          int visitCount, long lastHotAtMs, double emaIntervalMs, long lastSeenMs,
+                          double contentScore) {
     }
 
     static final class ZoneReuseStat {
@@ -123,6 +150,7 @@ public final class ZoneReuseModel {
         long lastHotAtMs;
         double emaIntervalMs;
         long lastSeenMs;
+        double contentScore;
 
         static ZoneReuseStat firstVisit(long now) {
             ZoneReuseStat s = new ZoneReuseStat();
@@ -133,13 +161,32 @@ public final class ZoneReuseModel {
             return s;
         }
 
-        static ZoneReuseStat restore(int visitCount, long lastHotAtMs, double emaIntervalMs, long lastSeenMs) {
+        static ZoneReuseStat contentOnly(long now) {
+            ZoneReuseStat s = new ZoneReuseStat();
+            s.visitCount = 0;
+            s.lastHotAtMs = 0L;
+            s.emaIntervalMs = 0.0D;
+            s.lastSeenMs = now;
+            return s;
+        }
+
+        static ZoneReuseStat restore(int visitCount, long lastHotAtMs, double emaIntervalMs,
+                                     long lastSeenMs, double contentScore) {
             ZoneReuseStat s = new ZoneReuseStat();
             s.visitCount = Math.max(0, visitCount);
             s.lastHotAtMs = lastHotAtMs;
             s.emaIntervalMs = Math.max(0.0D, emaIntervalMs);
             s.lastSeenMs = lastSeenMs;
+            s.contentScore = FeatureNormalizer.clamp01(contentScore);
             return s;
+        }
+
+        void applyContent(double observed) {
+            if (contentScore <= 0.0D) {
+                contentScore = observed;
+            } else {
+                contentScore = contentScore * (1.0D - CONTENT_BLEND) + observed * CONTENT_BLEND;
+            }
         }
 
         ZoneReuseStat revisit(long now) {

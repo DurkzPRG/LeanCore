@@ -30,6 +30,32 @@ class ZoneDormancyMapTest {
     }
 
     @Test
+    void countsZoneReturningHotSoonAfterUnloadAsFalseCut() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.zoneRevisitAfterUnloadWindowSeconds = 120;
+        ZoneDormancyMap map = new ZoneDormancyMap(config);
+        long now = 5_000_000L;
+
+        map.noteZoneUnloaded(ZONE_A, now);
+        map.refreshFromPlayerZones(List.of(ZONE_A), now + 30_000L);
+
+        assertEquals(1, map.revisitAfterUnloadCount());
+    }
+
+    @Test
+    void ignoresZoneReturningHotAfterWindow() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.zoneRevisitAfterUnloadWindowSeconds = 120;
+        ZoneDormancyMap map = new ZoneDormancyMap(config);
+        long now = 5_000_000L;
+
+        map.noteZoneUnloaded(ZONE_A, now);
+        map.refreshFromPlayerZones(List.of(ZONE_A), now + 200_000L);
+
+        assertEquals(0, map.revisitAfterUnloadCount());
+    }
+
+    @Test
     void keepsPinnedZoneHotWithoutPlayer() {
         LeanCoreConfig config = new LeanCoreConfig();
         ZoneDormancyMap map = new ZoneDormancyMap(config);

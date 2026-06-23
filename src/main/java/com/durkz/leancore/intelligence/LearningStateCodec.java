@@ -20,13 +20,14 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
- * Compact gzip binary persistence for learning state (schema v8).
- * v8 adds per-zone reuse stats; v7 payloads still load (with empty zones).
- * Typical size: a few KB solo, tens of KB with hundreds of players.
+ * Compact gzip binary persistence for learning state (schema v9).
+ * v9 adds a per-zone content score; v8 (zones without content) and v7 (no zones) payloads still
+ * load. Typical size: a few KB solo, tens of KB with hundreds of players.
  */
 final class LearningStateCodec {
 
-    static final int VERSION = 8;
+    static final int VERSION = 9;
+    static final int VERSION_WITH_ZONES = 8;
     static final int VERSION_WITHOUT_ZONES = 7;
     static final String GZ_FILE = "learning.state.gz";
     private static final int MAGIC = 0x454C434C; // "LCLC" little-endian
@@ -111,7 +112,7 @@ final class LearningStateCodec {
             throw new IOException("invalid learning state magic");
         }
         int version = in.readShort();
-        if (version != VERSION && version != VERSION_WITHOUT_ZONES) {
+        if (version != VERSION && version != VERSION_WITH_ZONES && version != VERSION_WITHOUT_ZONES) {
             throw new IOException("unsupported learning state version: " + version);
         }
         in.readByte(); // flags
@@ -143,7 +144,9 @@ final class LearningStateCodec {
         Map<String, BanditArm> banditArms = readBandit(in);
         Map<String, Long> blacklist = readBlacklist(in);
         Map<UUID, PlayerRecord> players = readPlayers(in);
-        List<ZoneReuseModel.Record> zones = version >= VERSION ? readZones(in) : new ArrayList<>();
+        List<ZoneReuseModel.Record> zones = version >= VERSION_WITH_ZONES
+                ? readZones(in, version)
+                : new ArrayList<>();
 
         return new Snapshot(
                 savedAtMs,
@@ -387,11 +390,12 @@ final class LearningStateCodec {
             out.writeLong(r.lastHotAtMs());
             out.writeDouble(r.emaIntervalMs());
             out.writeLong(r.lastSeenMs());
+            out.writeFloat((float) r.contentScore());
             written++;
         }
     }
 
-    private static List<ZoneReuseModel.Record> readZones(DataInputStream in) throws IOException {
+    private static List<ZoneReuseModel.Record> readZones(DataInputStream in, int version) throws IOException {
         int count = in.readInt();
         if (count < 0 || count > MAX_ZONE_ENTRIES) {
             throw new IOException("invalid learning state zone count: " + count);
@@ -405,8 +409,9 @@ final class LearningStateCodec {
             long lastHotAtMs = in.readLong();
             double emaIntervalMs = in.readDouble();
             long lastSeenMs = in.readLong();
+            double contentScore = version >= VERSION ? in.readFloat() : 0.0D;
             zones.add(new ZoneReuseModel.Record(world, regionX, regionZ,
-                    visitCount, lastHotAtMs, emaIntervalMs, lastSeenMs));
+                    visitCount, lastHotAtMs, emaIntervalMs, lastSeenMs, contentScore));
         }
         return zones;
     }

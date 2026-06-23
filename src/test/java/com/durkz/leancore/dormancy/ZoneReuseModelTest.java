@@ -96,4 +96,26 @@ class ZoneReuseModelTest {
                 "score survives export/import");
         assertEquals(4, restored.visitCount(k));
     }
+
+    @Test
+    void contentScoreBlendsAndPersists() {
+        ZoneReuseModel model = new ZoneReuseModel();
+        ZoneKey k = zone(5, 5);
+        model.noteHot(k, 0L);
+        model.noteHot(k, 1_000L);
+
+        model.noteContent(k, 1.0D, 2_000L);
+        double first = model.contentScore(k);
+        assertTrue(first > 0.99D, "first observation sets the content score directly");
+
+        model.noteContent(k, 0.0D, 3_000L);
+        assertTrue(model.contentScore(k) < first, "later observations blend the EMA down");
+
+        ZoneReuseModel restored = new ZoneReuseModel();
+        for (ZoneReuseModel.Record r : model.export(2)) {
+            restored.importRecord(r);
+        }
+        assertEquals(model.contentScore(k), restored.contentScore(k), 1e-6,
+                "content score survives export/import");
+    }
 }

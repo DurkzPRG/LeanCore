@@ -20,8 +20,10 @@ import com.hypixel.hytale.server.core.universe.world.storage.component.ChunkUnlo
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class ZoneChunkUnloader {
@@ -86,12 +88,15 @@ public class ZoneChunkUnloader {
             List<ZoneKey> zones = List.copyOf(entry.getValue());
             List<ChunkTracker> trackers = collectTrackers(entry.getKey());
             int[] counter = new int[1];
+            Set<ZoneKey> unloadedZones = new HashSet<>();
             // Read the counter only when the world task completed. On a timed-out dispatch the task
             // may still be mutating counter[0] on the world thread; trusting it here would be a data
             // race and could over-report unloads.
-            boolean done = WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
+            boolean done = WorldDispatch.run(world,
+                    () -> unloadOnWorld(world, zones, trackers, maxChunks, counter, unloadedZones));
             if (done) {
                 unloaded += counter[0];
+                noteUnloadedZones(dormancyMap, unloadedZones, nowMs);
             }
         }
 
@@ -162,9 +167,12 @@ public class ZoneChunkUnloader {
             List<ZoneKey> zones = List.copyOf(entry.getValue());
             List<ChunkTracker> trackers = collectTrackers(entry.getKey());
             int[] counter = new int[1];
-            boolean done = WorldDispatch.run(world, () -> unloadOnWorld(world, zones, trackers, maxChunks, counter));
+            Set<ZoneKey> unloadedZones = new HashSet<>();
+            boolean done = WorldDispatch.run(world,
+                    () -> unloadOnWorld(world, zones, trackers, maxChunks, counter, unloadedZones));
             if (done) {
                 unloaded += counter[0];
+                noteUnloadedZones(dormancyMap, unloadedZones, nowMs);
             }
         }
 
@@ -181,6 +189,16 @@ public class ZoneChunkUnloader {
                     unloaded, candidates.size(), tier, playerIdleSec));
         }
         return unloaded;
+    }
+
+    /** Feeds confirmed per-zone unloads to the dormancy map so revisit-after-unload can be scored. */
+    private static void noteUnloadedZones(ZoneDormancyMap dormancyMap, Set<ZoneKey> unloadedZones, long nowMs) {
+        if (dormancyMap == null || unloadedZones.isEmpty()) {
+            return;
+        }
+        for (ZoneKey zone : unloadedZones) {
+            dormancyMap.noteZoneUnloaded(zone, nowMs);
+        }
     }
 
     public int lastUnloadedChunks() {
@@ -213,7 +231,8 @@ public class ZoneChunkUnloader {
             List<ZoneKey> zones,
             List<ChunkTracker> trackers,
             int maxChunks,
-            int[] unloadedCounter
+            int[] unloadedCounter,
+            Set<ZoneKey> unloadedZones
     ) {
         if (maxChunks <= 0) {
             return;
@@ -239,6 +258,7 @@ public class ZoneChunkUnloader {
                     int chunkZ = baseChunkZ + dz;
                     if (tryUnloadChunk(world, chunkStore, trackers, chunkX, chunkZ)) {
                         unloadedCounter[0]++;
+                        unloadedZones.add(zone);
                     }
                 }
             }

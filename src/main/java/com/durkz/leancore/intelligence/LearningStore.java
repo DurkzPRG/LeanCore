@@ -32,7 +32,7 @@ public class LearningStore {
         void onWarning(String message, Throwable cause);
     }
 
-    static final int SCHEMA_VERSION = 8;
+    static final int SCHEMA_VERSION = 9;
     private static final String STATE_FILE_LEGACY = "learning.state";
     private static final long HEAP_DIRTY_INTERVAL_MS = 60_000L;
     private static final int MIN_PERSISTED_ZONE_VISITS = 2;
@@ -435,7 +435,7 @@ public class LearningStore {
     public String statusLine() {
         long now = System.currentTimeMillis();
         return String.format(Locale.ROOT,
-                "learning=v8 enabled=%s lite=%s flushes=%d flushErr=%d lastFlush=%s players=%d zones=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
+                "learning=v9 enabled=%s lite=%s flushes=%d flushErr=%d lastFlush=%s players=%d zones=%d state=%s pruned=%d tier=%s heap60s=%.0f%% eval=%d discard=%d falseCuts=%d blacklist=%d",
                 config.learningEnabled,
                 config.liteLearningEnabled,
                 flushCount,

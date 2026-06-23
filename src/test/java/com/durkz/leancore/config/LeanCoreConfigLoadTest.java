@@ -1,5 +1,6 @@
 package com.durkz.leancore.config;
 
+import com.durkz.leancore.runtime.RuntimeActivationPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -40,6 +41,17 @@ class LeanCoreConfigLoadTest {
         config.normalizeDefaults();
 
         assertEquals(1.6D, config.motionViewRadiusMaxBoost, 1e-9);
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void legacyLocalHostPassiveModeMigratesToPassive() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        config.localHostPassiveMode = true;
+        config.normalizeDefaults();
+
+        assertEquals(RuntimeActivationPolicy.MODE_PASSIVE, config.localHostMode);
+        assertTrue(RuntimeActivationPolicy.isFullyPassive(config));
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.diagnostics.DiagnosticLog;
+import com.durkz.leancore.intelligence.FalseCutTracker;
 import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -16,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class ZoneDormancyMap {
@@ -26,6 +28,9 @@ public class ZoneDormancyMap {
     private final Set<ZoneKey> pinned = ConcurrentHashMap.newKeySet();
     private volatile PredictedPositionSource positionSource;
     private volatile ZoneReuseModel reuseModel;
+    private volatile FalseCutTracker falseCutTracker;
+    private final Map<ZoneKey, Long> recentlyUnloadedAtMs = new ConcurrentHashMap<>();
+    private final AtomicInteger revisitAfterUnloadCount = new AtomicInteger();
 
     public ZoneDormancyMap(LeanCoreConfig config) {
         this.config = config;
@@ -37,6 +42,26 @@ public class ZoneDormancyMap {
 
     public void setZoneReuseModel(ZoneReuseModel model) {
         this.reuseModel = model;
+    }
+
+    public void setFalseCutTracker(FalseCutTracker tracker) {
+        this.falseCutTracker = tracker;
+    }
+
+    /**
+     * Records that a zone just had chunks unloaded, so a near-term return to HOT can be scored as a
+     * false cut (v1.6.0 Frente 2 reward). Called by the unloader after a confirmed unload.
+     */
+    public void noteZoneUnloaded(ZoneKey key, long nowMs) {
+        if (key == null) {
+            return;
+        }
+        recentlyUnloadedAtMs.put(key, nowMs);
+    }
+
+    /** Zones that returned to HOT within the configured window after being unloaded (session total). */
+    public int revisitAfterUnloadCount() {
+        return revisitAfterUnloadCount.get();
     }
 
     /**
@@ -62,7 +87,9 @@ public class ZoneDormancyMap {
             zones.put(key, ZoneState.HOT);
             lastHotAtMs.put(key, now);
             if (prev != ZoneState.HOT) {
-                String why = reuseEnabled && reuse.visitCount(key) > 1 ? "revisit" : "player entered";
+                boolean afterUnload = noteRevisitAfterUnload(key, now);
+                String why = afterUnload ? "revisit-after-unload"
+                        : (reuseEnabled && reuse.visitCount(key) > 1 ? "revisit" : "player entered");
                 changes.add((prev == null ? "NEW" : prev.name()) + "->HOT " + key + " " + why);
             }
         }
@@ -76,6 +103,7 @@ public class ZoneDormancyMap {
             double scale = reuseEnabled
                     ? reuse.thresholdScale(key, config.zoneReuseThresholdScaleMin, config.zoneReuseThresholdScaleMax)
                     : 1.0D;
+            scale = applyContentToThreshold(key, scale, reuse);
             long dormantMin = Math.round(config.dormantAfterMinutes * scale);
             long frozenMin = Math.round(config.frozenAfterMinutes * scale);
             ZoneState prev = zones.get(key);
@@ -101,6 +129,28 @@ public class ZoneDormancyMap {
 
         pruneStaleZones(now);
         logTransitions(changes);
+    }
+
+    /**
+     * Scores a zone that just turned HOT as a false cut when we unloaded it inside the configured
+     * window. Always increments the observability counter; only feeds the bandit reward when
+     * {@code zoneFalseCutRewardEnabled} is set. Returns true when the revisit was within the window.
+     */
+    private boolean noteRevisitAfterUnload(ZoneKey key, long now) {
+        Long unloadedAt = recentlyUnloadedAtMs.remove(key);
+        if (unloadedAt == null) {
+            return false;
+        }
+        long windowMs = Math.max(0, config.zoneRevisitAfterUnloadWindowSeconds) * 1000L;
+        if (windowMs <= 0L || now - unloadedAt > windowMs) {
+            return false;
+        }
+        revisitAfterUnloadCount.incrementAndGet();
+        FalseCutTracker tracker = this.falseCutTracker;
+        if (config.zoneFalseCutRewardEnabled && tracker != null) {
+            tracker.noteCut(true);
+        }
+        return true;
     }
 
     private String transitionReason(ZoneKey key, ZoneState prev, ZoneState next, long idleMin,
@@ -161,6 +211,13 @@ public class ZoneDormancyMap {
             zones.remove(key);
             return true;
         });
+        long unloadWindowMs = Math.max(0, config.zoneRevisitAfterUnloadWindowSeconds) * 1000L;
+        if (unloadWindowMs <= 0L) {
+            recentlyUnloadedAtMs.clear();
+        } else {
+            long unloadCutoff = now - unloadWindowMs;
+            recentlyUnloadedAtMs.entrySet().removeIf(entry -> entry.getValue() < unloadCutoff);
+        }
     }
 
     /**
@@ -340,7 +397,39 @@ public class ZoneDormancyMap {
             return distance;
         }
         double revisit = reuse.revisitScore(key, nowMs);
-        return distance * (1.0D + config.zoneReuseRankWeight * (1.0D - revisit));
+        double priority = distance * (1.0D + config.zoneReuseRankWeight * (1.0D - revisit));
+        // Content-rich zones (chests/benches/built base) should be evicted last: shrink their
+        // priority by up to 90% with the built-content score. Off when the content model is off.
+        double content = contentScore0(key, reuse);
+        if (content > 0.0D) {
+            priority *= 1.0D - Math.min(0.9D, config.zoneContentRankWeight * content);
+        }
+        return priority;
+    }
+
+    /**
+     * Content score in [0,1] for the zone, or 0 when the content model is off. Read from the reuse
+     * model's persisted per-zone EMA (v1.7.0 Frente B).
+     */
+    private double contentScore0(ZoneKey key, ZoneReuseModel reuse) {
+        if (!config.zoneContentModelEnabled || reuse == null || key == null) {
+            return 0.0D;
+        }
+        return reuse.contentScore(key);
+    }
+
+    /**
+     * Stretches the dormancy threshold scale for content-rich zones so a built base stays HOT longer
+     * before aging to DORMANT/FROZEN. Re-clamped to the configured reuse scale band.
+     */
+    private double applyContentToThreshold(ZoneKey key, double scale, ZoneReuseModel reuse) {
+        double content = contentScore0(key, reuse);
+        if (content <= 0.0D) {
+            return scale;
+        }
+        double boosted = scale * (1.0D + config.zoneContentRankWeight * content);
+        return Math.max(config.zoneReuseThresholdScaleMin,
+                Math.min(config.zoneReuseThresholdScaleMax, boosted));
     }
 
     /** Revisit likelihood in [0,1] for the zone, or neutral (0.5) when the model is off. */
@@ -376,16 +465,24 @@ public class ZoneDormancyMap {
         sb.append("reuse tracked=").append(reuse.size()).append(" top:");
         int cap = Math.max(1, topN);
         int shown = 0;
+        boolean contentOn = config.zoneContentModelEnabled;
         for (Map.Entry<ZoneKey, Double> e : scored) {
             if (shown >= cap) {
                 break;
             }
             sb.append(String.format(Locale.ROOT, " %s=%.2f(x%.2f)",
                     e.getKey(), e.getValue(), thresholdScale(e.getKey())));
+            if (contentOn) {
+                sb.append(String.format(Locale.ROOT, "c%.2f", reuse.contentScore(e.getKey())));
+            }
             shown++;
         }
         if (shown == 0) {
             sb.append(" none");
+        }
+        int revisits = revisitAfterUnloadCount.get();
+        if (revisits > 0) {
+            sb.append(" revisitAfterUnload=").append(revisits);
         }
         return sb.toString();
     }

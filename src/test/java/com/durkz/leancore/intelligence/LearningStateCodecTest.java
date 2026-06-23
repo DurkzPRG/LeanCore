@@ -30,9 +30,9 @@ class LearningStateCodecTest {
     }
 
     @Test
-    void roundTripsZonesV8() throws Exception {
+    void roundTripsZonesWithContent() throws Exception {
         UUID world = new UUID(7L, 9L);
-        ZoneReuseModel.Record record = new ZoneReuseModel.Record(world, 4, -3, 6, 123_000L, 45_000.0D, 200_000L);
+        ZoneReuseModel.Record record = new ZoneReuseModel.Record(world, 4, -3, 6, 123_000L, 45_000.0D, 200_000L, 0.75D);
         LearningStateCodec.Snapshot snapshot = emptySnapshot(List.of(record));
 
         LearningStateCodec.Snapshot decoded = LearningStateCodec.decode(LearningStateCodec.encode(snapshot));
@@ -46,6 +46,7 @@ class LearningStateCodecTest {
         assertEquals(123_000L, out.lastHotAtMs());
         assertEquals(45_000.0D, out.emaIntervalMs(), 1e-6);
         assertEquals(200_000L, out.lastSeenMs());
+        assertEquals(0.75D, out.contentScore(), 1e-6);
     }
 
     @Test
