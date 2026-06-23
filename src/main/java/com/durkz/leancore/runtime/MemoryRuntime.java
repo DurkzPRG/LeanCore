@@ -35,9 +35,11 @@ import com.hypixel.hytale.server.core.universe.world.World;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -640,6 +642,13 @@ public class MemoryRuntime {
         int engineRemoved = 0;
         boolean unloadTruth = config.chunkUnloadEventTracking && config.perChunkUnloadTruthEnabled;
         boolean contentScan = config.zoneContentModelEnabled;
+        if (unloadTruth) {
+            Set<UUID> aliveWorlds = new HashSet<>();
+            for (WorldBatch batch : batches) {
+                aliveWorlds.add(batch.worldUuid());
+            }
+            loadedChunkSetTracker.retainWorlds(aliveWorlds);
+        }
         long deadlineNs = System.nanoTime() + FAN_OUT_BUDGET_NANOS;
         for (WorldBatch batch : batches) {
             if (System.nanoTime() > deadlineNs) {

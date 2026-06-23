@@ -1,9 +1,10 @@
 package com.durkz.leancore.intelligence;
 
 import com.hypixel.hytale.server.core.universe.world.World;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -15,12 +16,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * since the last poll. More precise than the net {@code getLoadedChunksCount()} delta, which cancels
  * out chunks that load and unload in the same interval.
  * <p>
+ * Snapshots use primitive {@code LongOpenHashSet} (fastutil) to avoid boxing every chunk index, and
+ * {@link #retainWorlds} drops snapshots for worlds no longer tracked so instanced worlds cannot leak.
  * {@link #diffRemoved} reads the live chunk store, so it MUST run on the owning world thread (called
  * from inside a {@code WorldDispatch.run}).
  */
 public final class LoadedChunkSetTracker {
 
-    private final Map<UUID, Set<Long>> lastByWorld = new ConcurrentHashMap<>();
+    private final Map<UUID, LongOpenHashSet> lastByWorld = new ConcurrentHashMap<>();
 
     /**
      * Number of chunk indices present at the previous poll but gone now (removed since last call),
@@ -32,18 +35,14 @@ public final class LoadedChunkSetTracker {
             return 0;
         }
         LongSet current = world.getChunkStore().getChunkIndexes();
-        long[] indices = current.toLongArray();
-        Set<Long> snapshot = new HashSet<>(Math.max(16, indices.length * 2));
-        for (long idx : indices) {
-            snapshot.add(idx);
-        }
-        Set<Long> previous = lastByWorld.put(worldUuid, snapshot);
+        LongOpenHashSet snapshot = new LongOpenHashSet(current);
+        LongOpenHashSet previous = lastByWorld.put(worldUuid, snapshot);
         if (previous == null) {
             return 0;
         }
         int removed = 0;
-        for (Long idx : previous) {
-            if (!snapshot.contains(idx)) {
+        for (LongIterator it = previous.iterator(); it.hasNext(); ) {
+            if (!snapshot.contains(it.nextLong())) {
                 removed++;
             }
         }
@@ -55,5 +54,13 @@ public final class LoadedChunkSetTracker {
         if (worldUuid != null) {
             lastByWorld.remove(worldUuid);
         }
+    }
+
+    /** Keeps only snapshots for the given worlds, dropping the rest so instanced worlds cannot leak. */
+    public void retainWorlds(Set<UUID> aliveWorlds) {
+        if (aliveWorlds == null) {
+            return;
+        }
+        lastByWorld.keySet().removeIf(uuid -> !aliveWorlds.contains(uuid));
     }
 }
