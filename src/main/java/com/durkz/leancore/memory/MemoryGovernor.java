@@ -98,6 +98,9 @@ public class MemoryGovernor {
                         "view radius gate closed why=" + viewRadiusGateReason(sample));
             }
             commitPolicy(toApply, sample, demands, nowMs);
+            if (HotRadiusGovernance.shouldApply(config, viewRadiusGraceActive(nowMs))) {
+                applier.applyHotRadius(toApply, Universe.get().getPlayers());
+            }
         }
 
         long since = lastChangeMs <= 0L ? 0L : (nowMs - lastChangeMs) / 1000L;
@@ -154,6 +157,9 @@ public class MemoryGovernor {
                 scheduled = applier.apply(toApply, online, demands, policyChanged, RuntimeProfile.LITE);
             }
             commitLitePolicy(toApply, sample, nowMs);
+            if (HotRadiusGovernance.shouldApply(config, viewRadiusGraceActive(nowMs))) {
+                applier.applyHotRadius(toApply, Universe.get().getPlayers());
+            }
         }
 
         int unloadedChunks = zoneChunkUnloader.sweepLite(dormancyMap, sample.tier(), playerIdleSec);

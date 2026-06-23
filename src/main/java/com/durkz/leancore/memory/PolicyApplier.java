@@ -14,6 +14,7 @@ import com.durkz.leancore.intelligence.ViewRadiusCache;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.modules.entity.player.ChunkTracker;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -294,6 +295,68 @@ public class PolicyApplier {
         if (Math.abs(boosted - current) >= minDelta) {
             player.setClientViewRadius(boosted);
         }
+    }
+
+    /**
+     * Hot/simulation radius actuator (v1.7.0 Frente C). Drives {@code setMaxHotLoadedChunksRadius}
+     * (ticking radius) from the active policy, cutting simulation cost without the view-radius
+     * pop-in. Runs on each player's world thread; shrinks are skipped for holdout players so the
+     * cohort comparison stays clean. No-op unless {@code hotRadiusGovernanceEnabled}.
+     */
+    public void applyHotRadius(GovernorPolicy policy, Collection<PlayerRef> online) {
+        if (policy == null || online == null || !RuntimeGuard.active()
+                || !config.hotRadiusGovernanceEnabled) {
+            return;
+        }
+        int target = HotRadiusGovernance.targetHotRadius(config, policy.viewScale());
+        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
+        for (PlayerRef playerRef : online) {
+            if (playerRef == null || !playerRef.isValid()) {
+                continue;
+            }
+            UUID worldUuid = playerRef.getWorldUuid();
+            if (worldUuid == null) {
+                continue;
+            }
+            World world = Universe.get().getWorld(worldUuid);
+            if (world == null || !world.isAlive()) {
+                continue;
+            }
+            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(playerRef);
+        }
+        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
+            World world = Universe.get().getWorld(entry.getKey());
+            if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
+                continue;
+            }
+            List<PlayerRef> batch = List.copyOf(entry.getValue());
+            WorldDispatch.run(world, () -> {
+                if (!RuntimeGuard.active()) {
+                    return;
+                }
+                for (PlayerRef playerRef : batch) {
+                    applyHotRadiusOne(playerRef, target);
+                }
+            });
+        }
+    }
+
+    private void applyHotRadiusOne(PlayerRef playerRef, int target) {
+        if (playerRef == null || !playerRef.isValid()) {
+            return;
+        }
+        ChunkTracker tracker = playerRef.getChunkTracker();
+        if (tracker == null) {
+            return;
+        }
+        int current = tracker.getMaxHotLoadedChunksRadius();
+        if (HoldoutSet.isHoldout(playerRef.getUuid()) && target < current) {
+            return;
+        }
+        if (target == current) {
+            return;
+        }
+        tracker.setMaxHotLoadedChunksRadius(target);
     }
 
     /** Motion boost is upward only and capped at maxClientViewRadius. */
