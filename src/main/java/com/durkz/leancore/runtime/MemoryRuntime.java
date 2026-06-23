@@ -12,6 +12,8 @@ import com.durkz.leancore.dormancy.ZoneState;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.EngineUnloadPoller;
 import com.durkz.leancore.intelligence.LearningStore;
+import com.durkz.leancore.intelligence.LoadedChunkSetTracker;
+import com.durkz.leancore.probe.RegionalEntityProbe;
 import com.durkz.leancore.memory.GcHintScheduler;
 import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemoryGovernor;
@@ -63,6 +65,7 @@ public class MemoryRuntime {
     private final CriticalWebhookNotifier webhookNotifier;
     private final RegionalPressureCache regionalPressureCache = new RegionalPressureCache();
     private final EngineUnloadPoller engineUnloadPoller = new EngineUnloadPoller();
+    private final LoadedChunkSetTracker loadedChunkSetTracker = new LoadedChunkSetTracker();
     private final GcHintScheduler gcHintScheduler;
     private ChunkSaturationSampler chunkSaturationSampler;
 
@@ -129,6 +132,7 @@ public class MemoryRuntime {
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         dormancyMap.setPredictedPositionSource(classifier.features());
         dormancyMap.setZoneReuseModel(learningStore.zoneReuseModel());
+        dormancyMap.setFalseCutTracker(learningStore.falseCutTracker());
         ZoneChunkUnloader zoneChunkUnloader = new ZoneChunkUnloader(config, learningStore.unloadOutcomeTracker());
         RetentionAllocator allocator = new RetentionAllocator(config);
         PolicyApplier applier = new PolicyApplier(config, learningStore.falseCutTracker(), classifier.features());
@@ -204,6 +208,10 @@ public class MemoryRuntime {
         lines.add(String.format(Locale.ROOT,
                 "motion=%s viewBoost=%s zoneReuse=%s",
                 config.motionModelEnabled, config.motionViewRadiusBoostEnabled, config.zoneReuseModelEnabled));
+        lines.add(String.format(Locale.ROOT,
+                "v1.7.0 flags perChunkUnloadTruth=%s zoneContent=%s hotRadius=%s falseCutReward=%s",
+                config.perChunkUnloadTruthEnabled, config.zoneContentModelEnabled,
+                config.hotRadiusGovernanceEnabled, config.zoneFalseCutRewardEnabled));
         lines.add("loaded " + learningStore.statusLine());
         lines.add("==============================================");
         DiagnosticLog.info(lines);
@@ -526,7 +534,9 @@ public class MemoryRuntime {
             lastDormancyRefreshMs = nowMs;
         }
 
-        if (config.chunkUnloadEventTracking) {
+        // Front A: per-chunk unload truth runs inside the batched dormancy dispatch below. The
+        // legacy net-count poller only runs when that path is off, so we never double-count.
+        if (config.chunkUnloadEventTracking && !config.perChunkUnloadTruthEnabled) {
             engineUnloadPoller.poll(online, learningStore.unloadOutcomeTracker());
         }
 
@@ -618,13 +628,18 @@ public class MemoryRuntime {
     }
 
     /**
-     * Gathers hot zones per world on each world thread, then runs the dormancy state machine once.
-     * Each world fills a local buffer and only merges on a successful run, so a timed-out task can
-     * never race the aggregate. If any world is missed we skip the refresh rather than age its zones.
+     * Batched per-world reads (v1.7.0 Frente D): one {@code WorldDispatch.run} per world gathers hot
+     * zones, diffs the loaded-chunk set for unload truth (Frente A), and scans built content for the
+     * content model (Frente B). Each world fills a local buffer and only merges on a successful run,
+     * so a timed-out task can never race the aggregate. If any world is missed we skip the dormancy
+     * refresh rather than age its zones; the unload/content signals still merge per completed world.
      */
     private void refreshDormancyPerWorld(List<WorldBatch> batches, long nowMs) {
         List<ZoneKey> hot = new ArrayList<>();
         boolean complete = true;
+        int engineRemoved = 0;
+        boolean unloadTruth = config.chunkUnloadEventTracking && config.perChunkUnloadTruthEnabled;
+        boolean contentScan = config.zoneContentModelEnabled;
         long deadlineNs = System.nanoTime() + FAN_OUT_BUDGET_NANOS;
         for (WorldBatch batch : batches) {
             if (System.nanoTime() > deadlineNs) {
@@ -634,22 +649,51 @@ public class MemoryRuntime {
                 break;
             }
             List<ZoneKey> local = new ArrayList<>();
+            int[] removed = {0};
             boolean done = WorldDispatch.run(batch.world(), () -> {
                 GovernorWorldContext.enter(batch.worldUuid());
                 try {
                     local.addAll(ZoneDormancyMap.hotZonesForPlayers(batch.players()));
+                    if (unloadTruth) {
+                        removed[0] = loadedChunkSetTracker.diffRemoved(batch.worldUuid(), batch.world());
+                    }
+                    if (contentScan) {
+                        scanContentOnWorld(batch, nowMs);
+                    }
                 } finally {
                     GovernorWorldContext.exit();
                 }
             });
             if (done) {
                 hot.addAll(local);
+                engineRemoved += removed[0];
             } else {
                 complete = false;
             }
         }
+        if (unloadTruth && engineRemoved > 0) {
+            learningStore.unloadOutcomeTracker().noteEngineUnloads(engineRemoved);
+        }
         if (complete) {
             dormancyMap.refreshFromHotZones(hot, nowMs);
+        }
+    }
+
+    /**
+     * Samples built-content density for each player's current zone and folds it into the persisted
+     * per-zone content EMA. Runs on the world thread (called from inside the batched dispatch), so a
+     * zone's content is learned while the player is present and reused once the zone cools.
+     */
+    private void scanContentOnWorld(WorldBatch batch, long nowMs) {
+        var reuseModel = learningStore.zoneReuseModel();
+        if (reuseModel == null) {
+            return;
+        }
+        for (PlayerRef ref : batch.players()) {
+            RegionalEntityProbe.RegionalEntitySample sample = RegionalEntityProbe.read(ref, batch.world());
+            if (sample.zone() != null) {
+                reuseModel.noteContent(sample.zone(), sample.contentScore(), nowMs);
+            }
         }
     }
 
