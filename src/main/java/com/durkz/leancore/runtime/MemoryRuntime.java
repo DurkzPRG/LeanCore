@@ -532,8 +532,9 @@ public class MemoryRuntime {
 
         long dormancyIntervalMs = dormancyIntervalMs(profile);
         if (lastDormancyRefreshMs <= 0L || nowMs - lastDormancyRefreshMs >= dormancyIntervalMs) {
-            refreshDormancyPerWorld(batches, nowMs);
-            lastDormancyRefreshMs = nowMs;
+            if (refreshDormancyPerWorld(batches, nowMs)) {
+                lastDormancyRefreshMs = nowMs;
+            }
         }
 
         // Front A: per-chunk unload truth runs inside the batched dormancy dispatch below. The
@@ -635,8 +636,10 @@ public class MemoryRuntime {
      * content model (Frente B). Each world fills a local buffer and only merges on a successful run,
      * so a timed-out task can never race the aggregate. If any world is missed we skip the dormancy
      * refresh rather than age its zones; the unload/content signals still merge per completed world.
+     * Returns true only when every world ran, so the caller can avoid advancing the refresh clock on
+     * a partial pass and retry next tick.
      */
-    private void refreshDormancyPerWorld(List<WorldBatch> batches, long nowMs) {
+    private boolean refreshDormancyPerWorld(List<WorldBatch> batches, long nowMs) {
         List<ZoneKey> hot = new ArrayList<>();
         boolean complete = true;
         int engineRemoved = 0;
@@ -686,6 +689,7 @@ public class MemoryRuntime {
         if (complete) {
             dormancyMap.refreshFromHotZones(hot, nowMs);
         }
+        return complete;
     }
 
     /**
@@ -735,12 +739,13 @@ public class MemoryRuntime {
                 lastDormancyRefreshMs,
                 soloXZ
         )) {
-            refreshDormancyPerWorld(batches, nowMs);
-            lastDormancyRefreshMs = nowMs;
-            SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion(soloXZ);
-            lastLiteX = motion.x();
-            lastLiteZ = motion.z();
-            lastLitePositioned = motion.positioned();
+            if (refreshDormancyPerWorld(batches, nowMs)) {
+                lastDormancyRefreshMs = nowMs;
+                SoloRuntimePolicy.PlayerMotionSnapshot motion = SoloRuntimePolicy.captureMotion(soloXZ);
+                lastLiteX = motion.x();
+                lastLiteZ = motion.z();
+                lastLitePositioned = motion.positioned();
+            }
         }
 
         if (!SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {

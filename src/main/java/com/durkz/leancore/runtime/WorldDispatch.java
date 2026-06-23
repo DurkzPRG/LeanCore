@@ -51,7 +51,9 @@ public final class WorldDispatch {
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return false;
-        } catch (Exception ignored) {
+        } catch (Exception ex) {
+            DiagnosticLog.infoOnChange("worlddispatch-error",
+                    "world task failed: " + ex.getClass().getSimpleName());
             return false;
         }
     }
