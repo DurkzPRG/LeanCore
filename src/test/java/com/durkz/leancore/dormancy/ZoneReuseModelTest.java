@@ -118,4 +118,23 @@ class ZoneReuseModelTest {
         assertEquals(model.contentScore(k), restored.contentScore(k), 1e-6,
                 "content score survives export/import");
     }
+
+    @Test
+    void contentOnlyZonePersistsBelowVisitThreshold() {
+        ZoneReuseModel model = new ZoneReuseModel();
+        ZoneKey k = zone(8, 8);
+        // Single visit (visitCount=1, below the persist threshold of 2) but with built content.
+        model.noteHot(k, 0L);
+        model.noteContent(k, 1.0D, 1_000L);
+        assertEquals(1, model.visitCount(k));
+
+        List<ZoneReuseModel.Record> records = model.export(2);
+        assertEquals(1, records.size(), "a single-visit zone with content is still exported");
+
+        ZoneReuseModel restored = new ZoneReuseModel();
+        for (ZoneReuseModel.Record r : records) {
+            restored.importRecord(r);
+        }
+        assertTrue(restored.contentScore(k) > 0.99D, "content survives restart even below visit threshold");
+    }
 }

@@ -70,10 +70,8 @@ public final class ZoneReuseModel {
         }
         final double observed = FeatureNormalizer.clamp01(contentScore);
         stats.compute(key, (k, prev) -> {
-            ZoneReuseStat stat = prev == null ? ZoneReuseStat.contentOnly(nowMs) : prev;
-            stat.applyContent(observed);
-            stat.lastSeenMs = nowMs;
-            return stat;
+            ZoneReuseStat base = prev == null ? ZoneReuseStat.contentOnly(nowMs) : prev;
+            return base.withContent(observed, nowMs);
         });
     }
 
@@ -112,12 +110,16 @@ public final class ZoneReuseModel {
         return removed;
     }
 
-    /** Export persistable records for zones with at least {@code minVisits} visits. */
+    /**
+     * Export persistable records for zones with at least {@code minVisits} visits, plus any zone
+     * that already carries a learned content score (v1.7.0 Frente B): a base built during a single
+     * visit would otherwise be dropped before its content survives a restart.
+     */
     public List<Record> export(int minVisits) {
         List<Record> out = new ArrayList<>();
         for (Map.Entry<ZoneKey, ZoneReuseStat> e : stats.entrySet()) {
             ZoneReuseStat s = e.getValue();
-            if (s.visitCount < minVisits) {
+            if (s.visitCount < minVisits && s.contentScore <= 0.0D) {
                 continue;
             }
             ZoneKey k = e.getKey();
@@ -145,61 +147,55 @@ public final class ZoneReuseModel {
                           double contentScore) {
     }
 
+    /**
+     * Immutable per-zone stat. Writers mutate via {@code ConcurrentHashMap.compute} by returning a
+     * new instance, so the map publishes a fully-constructed object: readers on the scheduler/persist
+     * threads never observe a torn or half-updated field. Do not add mutable state here.
+     */
     static final class ZoneReuseStat {
-        int visitCount;
-        long lastHotAtMs;
-        double emaIntervalMs;
-        long lastSeenMs;
-        double contentScore;
+        final int visitCount;
+        final long lastHotAtMs;
+        final double emaIntervalMs;
+        final long lastSeenMs;
+        final double contentScore;
+
+        private ZoneReuseStat(int visitCount, long lastHotAtMs, double emaIntervalMs,
+                              long lastSeenMs, double contentScore) {
+            this.visitCount = visitCount;
+            this.lastHotAtMs = lastHotAtMs;
+            this.emaIntervalMs = emaIntervalMs;
+            this.lastSeenMs = lastSeenMs;
+            this.contentScore = contentScore;
+        }
 
         static ZoneReuseStat firstVisit(long now) {
-            ZoneReuseStat s = new ZoneReuseStat();
-            s.visitCount = 1;
-            s.lastHotAtMs = now;
-            s.emaIntervalMs = 0.0D;
-            s.lastSeenMs = now;
-            return s;
+            return new ZoneReuseStat(1, now, 0.0D, now, 0.0D);
         }
 
         static ZoneReuseStat contentOnly(long now) {
-            ZoneReuseStat s = new ZoneReuseStat();
-            s.visitCount = 0;
-            s.lastHotAtMs = 0L;
-            s.emaIntervalMs = 0.0D;
-            s.lastSeenMs = now;
-            return s;
+            return new ZoneReuseStat(0, 0L, 0.0D, now, 0.0D);
         }
 
         static ZoneReuseStat restore(int visitCount, long lastHotAtMs, double emaIntervalMs,
                                      long lastSeenMs, double contentScore) {
-            ZoneReuseStat s = new ZoneReuseStat();
-            s.visitCount = Math.max(0, visitCount);
-            s.lastHotAtMs = lastHotAtMs;
-            s.emaIntervalMs = Math.max(0.0D, emaIntervalMs);
-            s.lastSeenMs = lastSeenMs;
-            s.contentScore = FeatureNormalizer.clamp01(contentScore);
-            return s;
+            return new ZoneReuseStat(Math.max(0, visitCount), lastHotAtMs,
+                    Math.max(0.0D, emaIntervalMs), lastSeenMs,
+                    FeatureNormalizer.clamp01(contentScore));
         }
 
-        void applyContent(double observed) {
-            if (contentScore <= 0.0D) {
-                contentScore = observed;
-            } else {
-                contentScore = contentScore * (1.0D - CONTENT_BLEND) + observed * CONTENT_BLEND;
-            }
+        ZoneReuseStat withContent(double observed, long nowMs) {
+            double next = contentScore <= 0.0D
+                    ? observed
+                    : contentScore * (1.0D - CONTENT_BLEND) + observed * CONTENT_BLEND;
+            return new ZoneReuseStat(visitCount, lastHotAtMs, emaIntervalMs, nowMs, next);
         }
 
         ZoneReuseStat revisit(long now) {
             long interval = Math.max((long) MIN_INTERVAL_MS, now - lastHotAtMs);
-            if (emaIntervalMs <= 0.0D) {
-                emaIntervalMs = interval;
-            } else {
-                emaIntervalMs = emaIntervalMs * (1.0D - INTERVAL_BLEND) + interval * INTERVAL_BLEND;
-            }
-            visitCount++;
-            lastHotAtMs = now;
-            lastSeenMs = now;
-            return this;
+            double nextEma = emaIntervalMs <= 0.0D
+                    ? interval
+                    : emaIntervalMs * (1.0D - INTERVAL_BLEND) + interval * INTERVAL_BLEND;
+            return new ZoneReuseStat(visitCount + 1, now, nextEma, now, contentScore);
         }
 
         double revisitScore(long nowMs) {
