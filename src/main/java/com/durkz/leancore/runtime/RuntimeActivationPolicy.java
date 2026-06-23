@@ -22,9 +22,8 @@ public final class RuntimeActivationPolicy {
         if (config.dedicatedServerMode) {
             return false;
         }
-        if (config.localHostPassiveMode) {
-            return true;
-        }
+        // The deprecated localHostPassiveMode flag is migrated to localHostMode=PASSIVE in
+        // LeanCoreConfig.applyRuntimeDefaults() (always run on load), so checking it here is redundant.
         String mode = normalizeMode(config.localHostMode);
         return MODE_PASSIVE.equals(mode);
     }

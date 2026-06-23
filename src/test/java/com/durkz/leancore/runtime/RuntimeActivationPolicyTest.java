@@ -14,7 +14,6 @@ class RuntimeActivationPolicyTest {
     void autoScalesLiteToStandardWithFriends() {
         LeanCoreConfig config = new LeanCoreConfig();
         config.localHostMode = "AUTO";
-        config.localHostPassiveMode = false;
         assertEquals(RuntimeProfile.LITE, RuntimeActivationPolicy.resolveProfile(config, 1));
         assertEquals(RuntimeProfile.STANDARD, RuntimeActivationPolicy.resolveProfile(config, 2));
         assertEquals(RuntimeProfile.STANDARD, RuntimeActivationPolicy.resolveProfile(config, 8));
@@ -42,13 +41,6 @@ class RuntimeActivationPolicyTest {
         assertTrue(RuntimeActivationPolicy.isFullyPassive(config));
         assertFalse(RuntimeActivationPolicy.backgroundRuntimeEnabled(config));
         assertNull(RuntimeActivationPolicy.resolveProfile(config, 4));
-    }
-
-    @Test
-    void legacyLocalHostPassiveModeFlag() {
-        LeanCoreConfig config = new LeanCoreConfig();
-        config.localHostPassiveMode = true;
-        assertTrue(RuntimeActivationPolicy.isFullyPassive(config));
     }
 
     @Test
