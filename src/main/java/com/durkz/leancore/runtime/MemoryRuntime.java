@@ -45,6 +45,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MemoryRuntime {
 
@@ -76,7 +77,7 @@ public class MemoryRuntime {
     private volatile RuntimeProfile activeProfile = RuntimeProfile.LITE;
 
     private volatile boolean running;
-    private volatile boolean shutdownDone;
+    private final AtomicBoolean shutdownDone = new AtomicBoolean(false);
     private ScheduledExecutorService scheduler;
     private ScheduledExecutorService persistScheduler;
     private ScheduledFuture<?> tickFuture;
@@ -162,7 +163,7 @@ public class MemoryRuntime {
 
     public void start() {
         shutdown();
-        shutdownDone = false;
+        shutdownDone.set(false);
         scheduler = newScheduler("LeanCore-runtime");
         persistScheduler = newScheduler("LeanCore-persist");
         running = true;
@@ -260,14 +261,13 @@ public class MemoryRuntime {
     }
 
     public boolean isRunning() {
-        return running && !shutdownDone;
+        return running && !shutdownDone.get();
     }
 
     public void shutdown() {
-        if (shutdownDone) {
+        if (!shutdownDone.compareAndSet(false, true)) {
             return;
         }
-        shutdownDone = true;
         running = false;
         if (tickFuture != null) {
             tickFuture.cancel(true);
