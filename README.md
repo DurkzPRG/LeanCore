@@ -14,6 +14,43 @@ On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK ch
 
 Requires Hytale server **>=0.5.6**.
 
+## With vs without LeanCore
+
+Same solo session, server RAM over time. Without the mod, every area you visit stays resident and heap only climbs until you restart. With LeanCore, idle areas cool down and release, so RAM rises under load and then settles back.
+
+```
+WITHOUT LeanCore     RAM only climbs, you restart to clear it
+
+limit ┤· · · · · · · · · · · · · · · · · · · ·  ▁▂▄▅▇  LIMIT
+     │                                     ▂▃▅▇█████
+     │                               ▁▂▃▅▆██████████
+ 50% │                          ▁▃▄▅▇███████████████
+     │                   ▁▁▃▄▅▆█████████████████████
+     │           ▁▁▂▃▄▅▆▇███████████████████████████
+  0% │▂▂▂▃▃▄▄▅▆▆▇███████████████████████████████████
+     ╰──────────────────────────────────────────────▶ time
+       peak     →  pinned at the RAM limit
+       average  →  keeps climbing
+       baseline →  never comes back down
+
+WITH LeanCore        idle areas release, RAM falls when you move on
+
+limit ┤
+     │· · · · · · · · · · · · · · · · · · · · · · ·   SAFE
+     │        ▃▇         ▁▅█         ▃▇         ▁▅█
+ 50% │      ▃▇██▆      ▁▅███       ▃▇██▆      ▁▅███
+     │    ▃▇█████    ▁▅█████▅    ▃▇█████    ▁▅█████▅
+     │  ▃▇███████▄ ▁▅████████  ▃▇███████▄ ▁▅████████
+  0% │▃▇██████████▅██████████▃▇██████████▅██████████
+     ╰──────────────────────────────────────────────▶ time
+       peak     →  held under the safe line
+       average  →  stays low and flat
+       baseline →  resets when you move on
+
+legend   █ RAM in use    · · threshold    ▶ time
+```
+
+
 ## What it does
 
 - Optional heap governor with COMFORT / WATCH / TIGHT / CRITICAL tiers and rollback
@@ -28,7 +65,7 @@ Requires Hytale server **>=0.5.6**.
 
 ## Runtime profiles
 
-| Players | Profile | Tick | Notes (1.6.0) |
+| Players | Profile | Tick | Notes (1.7.0) |
 |---------|---------|------|-----------------|
 | 1 (solo local) | `LITE` | 30s (60s idle) | Lite governor, adaptive view, AFK unload, lite learning, motion-aware retention |
 | 1 + `embeddedStandardProfile` | `STANDARD` | 15s | Dev dogfood of govern/learning without FULL |
@@ -38,9 +75,9 @@ Requires Hytale server **>=0.5.6**.
 
 Default: `localHostMode: "AUTO"`. Use `"PASSIVE"` to disable background ticks. Set `dedicatedServerMode: true` on a dedicated host.
 
-Boot log: `LeanCore 1.6.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
+Boot log: `LeanCore 1.7.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
 
-### LITE profile (1.6.0)
+### LITE profile (1.7.0)
 
 Solo embedded gets a real memory governor without switching to STANDARD. STANDARD/FULL unchanged.
 
@@ -56,9 +93,9 @@ STANDARD/FULL: view-radius and chunk unload still require `governEnabled` / `lea
 
 ## Install
 
-1. Download **LeanCore-1.6.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+1. Download **LeanCore-1.7.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Put the JAR in your world's `mods/` folder (or `%AppData%\Hytale\UserData\Mods\` on Windows)
-3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.6.0 defaults)
+3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.7.0 defaults)
 4. Run `/leancore probe` before enabling policy unload
 5. Run `/leancore status` after about a minute
 
@@ -97,7 +134,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `unloadEnabled` | `false` | STANDARD/FULL policy chunk unload (after `/leancore probe`) |
 | `gcHintEnabled` | `false` | Experimental LITE idle GC nudge; metrics in `/leancore savings` |
 
-### LITE keys (1.6.0)
+### LITE keys (1.7.0)
 
 | Key | Default | Notes |
 |-----|---------|-------|
@@ -108,7 +145,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `liteUnloadEnabled` | `true` | AFK reclaim; still needs probe |
 | `liteUnloadIdleSeconds` | `180` | Idle before unload sweeps |
 
-### Motion & retention keys (1.6.0)
+### Motion & retention keys (1.7.0)
 
 | Key | Default | Notes |
 |-----|---------|-------|
@@ -117,7 +154,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `motionViewRadiusBoostEnabled` | `false` | Opt-in cinematic view boost for fast movers; off because rewriting view radius each tick churns chunk loading on the current engine |
 | `diagnosticLogEnabled` | `true` | Always-on `[diag]` session/decision logs; set `false` to silence |
 
-Learning snapshot: `mods/durkz_LeanCore/learning.state.gz` (schema v8, gzip binary). Legacy `learning.state` is migrated on first flush.
+Learning snapshot: `mods/durkz_LeanCore/learning.state.gz` (schema v9, gzip binary). Legacy `learning.state` is migrated on first flush.
 
 Permissions: `durkz.leancore.hud`, `durkz.leancore.admin`
 
@@ -135,13 +172,13 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 ./gradlew build
 ```
 
-Output: `build/libs/LeanCore-1.6.0.jar`
+Output: `build/libs/LeanCore-1.7.0.jar`
 
 **Local deploy (DurkzPRG):** copy the built JAR to:
 
 `%AppData%\Hytale\UserData\Mods\`
 
-Example (Windows): `Copy-Item build\libs\LeanCore-1.6.0.jar $env:APPDATA\Hytale\UserData\Mods\`
+Example (Windows): `Copy-Item build\libs\LeanCore-1.7.0.jar $env:APPDATA\Hytale\UserData\Mods\`
 
 ## Links
 
