@@ -19,36 +19,55 @@ Requires Hytale server **>=0.5.6**.
 Same solo session, server RAM over time. Without the mod, every area you visit stays resident and heap only climbs until you restart. With LeanCore, idle areas cool down and release, so RAM rises under load and then settles back.
 
 ```
-WITHOUT LeanCore     RAM only climbs, you restart to clear it
+Server RAM over a long session   (taller bars = more RAM in use)
 
-limit ┤· · · · · · · · · · · · · · · · · · · ·  ▁▂▄▅▇  LIMIT
-     │                                     ▂▃▅▇█████
-     │                               ▁▂▃▅▆██████████
- 50% │                          ▁▃▄▅▇███████████████
-     │                   ▁▁▃▄▅▆█████████████████████
-     │           ▁▁▂▃▄▅▆▇███████████████████████████
-  0% │▂▂▂▃▃▄▄▅▆▆▇███████████████████████████████████
-     ╰──────────────────────────────────────────────▶ time
-       peak     →  pinned at the RAM limit
-       average  →  keeps climbing
-       baseline →  never comes back down
-
-WITH LeanCore        idle areas release, RAM falls when you move on
-
-limit ┤
-     │· · · · · · · · · · · · · · · · · · · · · · ·   SAFE
-     │        ▃▇         ▁▅█         ▃▇         ▁▅█
- 50% │      ▃▇██▆      ▁▅███       ▃▇██▆      ▁▅███
-     │    ▃▇█████    ▁▅█████▅    ▃▇█████    ▁▅█████▅
-     │  ▃▇███████▄ ▁▅████████  ▃▇███████▄ ▁▅████████
-  0% │▃▇██████████▅██████████▃▇██████████▅██████████
-     ╰──────────────────────────────────────────────▶ time
-       peak     →  held under the safe line
-       average  →  stays low and flat
-       baseline →  resets when you move on
-
-legend   █ RAM in use    · · threshold    ▶ time
+Without LeanCore   ▁▂▃▄▅▆▇███████████   climbs to the limit, then you restart
+With LeanCore      ▂▄▆▄▂▄▆▄▂▄▆▄▂▄▆▄▂▄   rises and falls, stays under control
 ```
+
+## How LeanCore decides
+
+Two signals drive every action: how tight memory is right now, and whether a zone is still wanted. The ladder picks how hard to act; the per-zone check decides what is safe to release.
+
+**Pressure to action**
+
+```
+                           every tick
+                                │
+                 read heap %  +  chunk pressure
+                                │
+               rank against THIS server's history
+                                │
+        ┌───────────────┬───────┴───────┬───────────────┐
+        ▼               ▼               ▼               ▼
+     COMFORT          WATCH           TIGHT         CRITICAL
+    full view      gentle trim   unload distant    max trim +
+   do nothing     + demote idle   dormant zones    unload + GC
+                                                    + webhook
+```
+
+**Keep or release a zone**
+
+```
+   each idle zone
+        │
+        ▼
+   player in / near it, or pinned?     ──► HOT   keep, never touched
+        │ no
+        ▼
+   inside current or predicted view?   ──► keep  would cause pop-in
+        │ no
+        ▼
+   idle long enough to be dormant?     ──► WARM  keep, still cooling
+        │ yes
+        ▼
+   rank: far away + unlikely to return + low built content
+        │
+        ▼
+   release   capped per pass, only chunks nobody can see,
+             and rolled back if it backfires
+```
+
 
 
 ## What it does
