@@ -309,6 +309,10 @@ public class PolicyApplier {
             return;
         }
         int target = HotRadiusGovernance.targetHotRadius(config, policy.viewScale());
+        DiagnosticLog.infoOnChange("hot-radius", String.format(Locale.ROOT,
+                "hot radius target=%d (max=%d min=%d viewScale=%.2f policy=%s)",
+                target, config.maxHotLoadedChunksRadius, config.minHotLoadedChunksRadius,
+                policy.viewScale(), policy.key()));
         Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
         for (PlayerRef playerRef : online) {
             if (playerRef == null || !playerRef.isValid()) {

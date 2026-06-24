@@ -62,7 +62,7 @@ public class LeanCoreConfig {
     /** Set when probe S1-S5 pass; persisted in LeanCore.json. */
     public long probePassedAtMs = 0L;
     /** Poll loaded-chunk deltas on the world thread; do not register ChunkUnloadEvent listeners. */
-    public boolean chunkUnloadEventTracking = false;
+    public boolean chunkUnloadEventTracking = true;
     public int unloadMinIntervalSeconds = 5;
     public int unloadMaxChunksPerSweep = 16;
     public int rollbackWindowSec = 60;
@@ -151,21 +151,21 @@ public class LeanCoreConfig {
     // the world thread counts the exact chunks the engine unloaded, instead of the net
     // getLoadedChunksCount() delta (which cancels out simultaneous loads). Feeds the engine-unload
     // reward in UnloadOutcomeTracker more cleanly. Requires chunkUnloadEventTracking to run at all.
-    // Off by default until validated.
-    public boolean perChunkUnloadTruthEnabled = false;
+    // On by default since 1.7.0 (validated in dogfood: exact engine-eviction counting).
+    public boolean perChunkUnloadTruthEnabled = true;
 
     // v1.7.0 Frente B: content-aware zone demand. Samples built-content density per zone (block
     // entities: chests, benches, infrastructure) on the world thread, keeps a persisted EMA per
     // zone, and biases unload eviction priority + dormancy thresholds toward keeping content-rich
-    // zones HOT even when idle. Off by default until validated on the holdout.
-    public boolean zoneContentModelEnabled = false;
+    // zones HOT even when idle. On by default since 1.7.0.
+    public boolean zoneContentModelEnabled = true;
     public double zoneContentRankWeight = 0.5D;
 
     // v1.7.0 Frente C: hot/simulation radius actuator. Mirrors the view-radius governor but drives
     // ChunkTracker.setMaxHotLoadedChunksRadius (ticking radius, separate from view radius), cutting
-    // CPU/heap of simulated chunks without the view-radius pop-in. Off by default; respects the same
-    // grace + holdout discipline as the view-radius governor.
-    public boolean hotRadiusGovernanceEnabled = false;
+    // CPU/heap of simulated chunks without the view-radius pop-in. On by default since 1.7.0; respects
+    // the same grace + holdout discipline as the view-radius governor.
+    public boolean hotRadiusGovernanceEnabled = true;
     public int minHotLoadedChunksRadius = 2;
     public int maxHotLoadedChunksRadius = 8;
 
