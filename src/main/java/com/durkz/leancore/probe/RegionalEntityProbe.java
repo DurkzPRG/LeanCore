@@ -63,7 +63,8 @@ public final class RegionalEntityProbe {
                 }
                 // Block-entities (chests, benches, doors, any placed infrastructure) are the robust
                 // "built content" signal for content-aware dormancy. Holders cover non-ticking ones.
-                BlockComponentChunk blockChunk = worldChunk.getBlockComponentChunk();
+                BlockComponentChunk blockChunk =
+                        chunkStore.getChunkComponent(index, BlockComponentChunk.getComponentType());
                 if (blockChunk != null) {
                     var blockRefs = blockChunk.getEntityReferences();
                     if (blockRefs != null) {
