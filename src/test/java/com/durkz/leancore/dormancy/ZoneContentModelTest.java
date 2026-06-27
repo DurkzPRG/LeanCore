@@ -28,4 +28,13 @@ class ZoneContentModelTest {
         assertEquals(1.0D, ZoneContentModel.scoreFromBlockEntities(64), 1e-9);
         assertEquals(1.0D, ZoneContentModel.scoreFromBlockEntities(10_000), 1e-9);
     }
+
+    @Test
+    void saturationCapIsTheExactClampPoint() {
+        int cap = ZoneContentModel.saturationBlockEntities();
+        assertEquals(1.0D, ZoneContentModel.scoreFromBlockEntities(cap), 1e-9,
+                "the cap must already score 1.0 so the early-exit is lossless");
+        assertTrue(ZoneContentModel.scoreFromBlockEntities(cap - 1) < 1.0D,
+                "one below the cap must still be under 1.0, so the cap is the smallest such count");
+    }
 }

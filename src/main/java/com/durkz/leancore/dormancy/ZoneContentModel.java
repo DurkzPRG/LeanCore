@@ -25,4 +25,13 @@ public final class ZoneContentModel {
         double score = Math.log(1.0D + blockEntities) / Math.log(1.0D + BLOCK_ENTITY_NORM);
         return Math.max(0.0D, Math.min(1.0D, score));
     }
+
+    /**
+     * Smallest block-entity count whose score is already clamped to 1.0. Once a regional scan reaches
+     * this many block-entities the score cannot rise further, so the scan can stop early without
+     * changing the result.
+     */
+    public static int saturationBlockEntities() {
+        return (int) Math.ceil(BLOCK_ENTITY_NORM);
+    }
 }

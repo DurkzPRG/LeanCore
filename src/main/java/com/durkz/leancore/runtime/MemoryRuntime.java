@@ -702,8 +702,12 @@ public class MemoryRuntime {
         if (reuseModel == null) {
             return;
         }
+        int saturationCap = com.durkz.leancore.dormancy.ZoneContentModel.saturationBlockEntities();
         for (PlayerRef ref : batch.players()) {
-            RegionalEntityProbe.RegionalEntitySample sample = RegionalEntityProbe.read(ref, batch.world());
+            // Content-only read: this path consumes only contentScore, so scan block-entities and
+            // stop once the score saturates (cheaper than the full regional/world entity probe).
+            RegionalEntityProbe.RegionalEntitySample sample =
+                    RegionalEntityProbe.read(ref, batch.world(), saturationCap);
             if (sample.zone() != null) {
                 reuseModel.noteContent(sample.zone(), sample.contentScore(), nowMs);
             }

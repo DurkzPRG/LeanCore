@@ -20,10 +20,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link #retainWorlds} drops snapshots for worlds no longer tracked so instanced worlds cannot leak.
  * {@link #diffRemoved} reads the live chunk store, so it MUST run on the owning world thread (called
  * from inside a {@code WorldDispatch.run}).
+ * <p>
+ * Each world keeps two reusable sets and swaps them every poll (double-buffering), so a steady world
+ * does not allocate a fresh snapshot per refresh. {@code clear()} keeps the backing array, so the
+ * copy of the live index set reuses capacity instead of growing a new table each time.
  */
 public final class LoadedChunkSetTracker {
 
-    private final Map<UUID, LongOpenHashSet> lastByWorld = new ConcurrentHashMap<>();
+    private final Map<UUID, WorldSnapshots> byWorld = new ConcurrentHashMap<>();
 
     /**
      * Number of chunk indices present at the previous poll but gone now (removed since last call),
@@ -34,25 +38,32 @@ public final class LoadedChunkSetTracker {
         if (worldUuid == null || world == null) {
             return 0;
         }
-        LongSet current = world.getChunkStore().getChunkIndexes();
-        LongOpenHashSet snapshot = new LongOpenHashSet(current);
-        LongOpenHashSet previous = lastByWorld.put(worldUuid, snapshot);
-        if (previous == null) {
-            return 0;
+        WorldSnapshots snapshots = byWorld.computeIfAbsent(worldUuid, ignored -> new WorldSnapshots());
+        LongSet live = world.getChunkStore().getChunkIndexes();
+        snapshots.current.clear();
+        if (live != null) {
+            snapshots.current.addAll(live);
         }
         int removed = 0;
-        for (LongIterator it = previous.iterator(); it.hasNext(); ) {
-            if (!snapshot.contains(it.nextLong())) {
-                removed++;
+        if (snapshots.primed) {
+            for (LongIterator it = snapshots.previous.iterator(); it.hasNext(); ) {
+                if (!snapshots.current.contains(it.nextLong())) {
+                    removed++;
+                }
             }
         }
+        // Swap: this poll's snapshot becomes the baseline; the old baseline buffer is reused next time.
+        LongOpenHashSet reuse = snapshots.previous;
+        snapshots.previous = snapshots.current;
+        snapshots.current = reuse;
+        snapshots.primed = true;
         return removed;
     }
 
     /** Drops the snapshot for a world that is no longer alive, so a reload re-primes cleanly. */
     public void forget(UUID worldUuid) {
         if (worldUuid != null) {
-            lastByWorld.remove(worldUuid);
+            byWorld.remove(worldUuid);
         }
     }
 
@@ -61,6 +72,13 @@ public final class LoadedChunkSetTracker {
         if (aliveWorlds == null) {
             return;
         }
-        lastByWorld.keySet().removeIf(uuid -> !aliveWorlds.contains(uuid));
+        byWorld.keySet().removeIf(uuid -> !aliveWorlds.contains(uuid));
+    }
+
+    /** Two reusable index sets per world, swapped each poll. Touched only on that world's thread. */
+    private static final class WorldSnapshots {
+        private LongOpenHashSet current = new LongOpenHashSet();
+        private LongOpenHashSet previous = new LongOpenHashSet();
+        private boolean primed;
     }
 }

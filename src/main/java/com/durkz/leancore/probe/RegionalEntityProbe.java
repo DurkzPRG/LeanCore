@@ -21,6 +21,17 @@ public final class RegionalEntityProbe {
     }
 
     public static RegionalEntitySample read(PlayerRef ref, World world) {
+        return read(ref, world, 0);
+    }
+
+    /**
+     * @param blockEntitySaturationCap when {@code > 0}, runs in content-only mode: it scans just the
+     *        {@link BlockComponentChunk} (skipping the {@link WorldChunk} lookup, entity counting and
+     *        the world-entity read) and stops once block-entities reach the cap, since the content
+     *        score is already clamped to 1.0 there. Callers in this mode must only read
+     *        {@link RegionalEntitySample#contentScore()}; the other counts are partial.
+     */
+    public static RegionalEntitySample read(PlayerRef ref, World world, int blockEntitySaturationCap) {
         if (ref == null || !ref.isValid() || world == null || !world.isAlive()) {
             return RegionalEntitySample.empty();
         }
@@ -42,23 +53,29 @@ public final class RegionalEntityProbe {
         int regionChunks = ZoneKey.regionChunks();
         int baseChunkX = zone.regionX() * regionChunks;
         int baseChunkZ = zone.regionZ() * regionChunks;
+        boolean contentOnly = blockEntitySaturationCap > 0;
 
         int entities = 0;
         int blockEntities = 0;
         int chunksSampled = 0;
+        scan:
         for (int dx = 0; dx < regionChunks; dx++) {
             for (int dz = 0; dz < regionChunks; dz++) {
                 long index = ChunkUtil.indexChunk(baseChunkX + dx, baseChunkZ + dz);
-                WorldChunk worldChunk = chunkStore.getChunkComponent(index, WorldChunk.getComponentType());
-                if (worldChunk == null) {
-                    continue;
-                }
-                chunksSampled++;
-                EntityChunk entityChunk = worldChunk.getEntityChunk();
-                if (entityChunk != null) {
-                    var refs = entityChunk.getEntityReferences();
-                    if (refs != null) {
-                        entities += refs.size();
+                // Full mode also counts regional entities (the WorldChunk path); content-only mode
+                // needs nothing but block-entities, so it skips that lookup entirely.
+                if (!contentOnly) {
+                    WorldChunk worldChunk = chunkStore.getChunkComponent(index, WorldChunk.getComponentType());
+                    if (worldChunk == null) {
+                        continue;
+                    }
+                    chunksSampled++;
+                    EntityChunk entityChunk = worldChunk.getEntityChunk();
+                    if (entityChunk != null) {
+                        var refs = entityChunk.getEntityReferences();
+                        if (refs != null) {
+                            entities += refs.size();
+                        }
                     }
                 }
                 // Block-entities (chests, benches, doors, any placed infrastructure) are the robust
@@ -66,6 +83,9 @@ public final class RegionalEntityProbe {
                 BlockComponentChunk blockChunk =
                         chunkStore.getChunkComponent(index, BlockComponentChunk.getComponentType());
                 if (blockChunk != null) {
+                    if (contentOnly) {
+                        chunksSampled++;
+                    }
                     var blockRefs = blockChunk.getEntityReferences();
                     if (blockRefs != null) {
                         blockEntities += blockRefs.size();
@@ -75,10 +95,14 @@ public final class RegionalEntityProbe {
                         blockEntities += holders.size();
                     }
                 }
+                // The content score saturates at the cap, so further chunks cannot change it.
+                if (contentOnly && blockEntities >= blockEntitySaturationCap) {
+                    break scan;
+                }
             }
         }
 
-        int worldEntities = PlayerSpatialProbe.readWorldEntityCount(ref);
+        int worldEntities = contentOnly ? 0 : PlayerSpatialProbe.readWorldEntityCount(ref);
         return new RegionalEntitySample(zone, chunksSampled, entities, worldEntities, blockEntities);
     }
 
