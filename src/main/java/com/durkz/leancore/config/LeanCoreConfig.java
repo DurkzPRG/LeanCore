@@ -176,6 +176,15 @@ public class LeanCoreConfig {
     public boolean loadingPressureSignalEnabled = true;
     public int unloadHoldWhenLoadingAbove = 16;
 
+    // Adaptive chunk throughput: scales each player's chunk send-rate (ChunkTracker maxChunksPerSecond
+    // / maxChunksPerTick) by memory tier, as a percentage of that player's connection-aware engine
+    // baseline (local 256 / LAN 128 / remote 36 per second). Speeds loading when heap is roomy and
+    // throttles it under pressure. Off by default; WATCH always stays at 100% of the baseline.
+    public boolean chunkThroughputGovernanceEnabled = false;
+    public int chunkThroughputComfortPct = 135;
+    public int chunkThroughputTightPct = 70;
+    public int chunkThroughputCriticalPct = 40;
+
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
     public boolean diagnosticLogEnabled = true;
@@ -279,6 +288,15 @@ public class LeanCoreConfig {
         }
         if (unloadHoldWhenLoadingAbove < 0) {
             unloadHoldWhenLoadingAbove = 16;
+        }
+        if (chunkThroughputComfortPct < 100) {
+            chunkThroughputComfortPct = 135;
+        }
+        if (chunkThroughputTightPct <= 0 || chunkThroughputTightPct > 100) {
+            chunkThroughputTightPct = 70;
+        }
+        if (chunkThroughputCriticalPct <= 0 || chunkThroughputCriticalPct > 100) {
+            chunkThroughputCriticalPct = 40;
         }
         sanitizeViewRadiusSettings();
         if (hudUpdateIntervalSeconds <= 0) {

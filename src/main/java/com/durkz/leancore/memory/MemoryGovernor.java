@@ -101,6 +101,9 @@ public class MemoryGovernor {
             if (HotRadiusGovernance.shouldApply(config, viewRadiusGraceActive(nowMs))) {
                 applier.applyHotRadius(toApply, Universe.get().getPlayers());
             }
+            if (config.chunkThroughputGovernanceEnabled) {
+                applier.applyChunkThroughput(sample.tier(), Universe.get().getPlayers());
+            }
         }
 
         long since = lastChangeMs <= 0L ? 0L : (nowMs - lastChangeMs) / 1000L;
@@ -159,6 +162,9 @@ public class MemoryGovernor {
             commitLitePolicy(toApply, sample, nowMs);
             if (HotRadiusGovernance.shouldApply(config, viewRadiusGraceActive(nowMs))) {
                 applier.applyHotRadius(toApply, Universe.get().getPlayers());
+            }
+            if (config.chunkThroughputGovernanceEnabled) {
+                applier.applyChunkThroughput(sample.tier(), Universe.get().getPlayers());
             }
         }
 

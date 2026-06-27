@@ -23,10 +23,13 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class PolicyApplier {
 
@@ -36,6 +39,10 @@ public class PolicyApplier {
 
     private String lastAppliedPolicyKey;
     private long lastApplyMs;
+
+    // Connection-aware engine chunk-rate baseline per player (perSecond, perTick), captured before we
+    // first touch it. Targets are a percentage of this, so the player's connection class is honored.
+    private final Map<UUID, int[]> chunkBaselineByPlayer = new ConcurrentHashMap<>();
 
     public PolicyApplier(LeanCoreConfig config, FalseCutTracker falseCutTracker, ViewRadiusCache viewRadiusCache) {
         this.config = config;
@@ -361,6 +368,84 @@ public class PolicyApplier {
             return;
         }
         tracker.setMaxHotLoadedChunksRadius(target);
+    }
+
+    /**
+     * Adaptive chunk-throughput actuator. Scales each player's chunk send-rate
+     * ({@code setMaxChunksPerSecond} / {@code setMaxChunksPerTick}) by memory tier, as a percentage
+     * of their connection-aware engine baseline (captured once, before we change it). Runs on each
+     * player's world thread. No-op unless {@code chunkThroughputGovernanceEnabled}. Reductions are
+     * skipped for holdout players so the cohort comparison stays clean.
+     */
+    public void applyChunkThroughput(MemoryTier tier, Collection<PlayerRef> online) {
+        if (tier == null || online == null || !RuntimeGuard.active()
+                || !config.chunkThroughputGovernanceEnabled) {
+            return;
+        }
+        Set<UUID> onlineIds = new HashSet<>();
+        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
+        for (PlayerRef playerRef : online) {
+            if (playerRef == null || !playerRef.isValid()) {
+                continue;
+            }
+            onlineIds.add(playerRef.getUuid());
+            UUID worldUuid = playerRef.getWorldUuid();
+            if (worldUuid == null) {
+                continue;
+            }
+            World world = Universe.get().getWorld(worldUuid);
+            if (world == null || !world.isAlive()) {
+                continue;
+            }
+            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(playerRef);
+        }
+        // Drop baselines for players who left, so the map cannot grow without bound.
+        chunkBaselineByPlayer.keySet().retainAll(onlineIds);
+        DiagnosticLog.infoOnChange("chunk-throughput", String.format(Locale.ROOT,
+                "chunk throughput tier=%s pct=%d%% (comfort=%d tight=%d critical=%d)",
+                tier, ChunkThroughputModel.percentForTier(config, tier),
+                config.chunkThroughputComfortPct, config.chunkThroughputTightPct,
+                config.chunkThroughputCriticalPct));
+        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
+            World world = Universe.get().getWorld(entry.getKey());
+            if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
+                continue;
+            }
+            List<PlayerRef> batch = List.copyOf(entry.getValue());
+            WorldDispatch.run(world, () -> {
+                if (!RuntimeGuard.active()) {
+                    return;
+                }
+                for (PlayerRef playerRef : batch) {
+                    applyChunkThroughputOne(playerRef, tier);
+                }
+            });
+        }
+    }
+
+    private void applyChunkThroughputOne(PlayerRef playerRef, MemoryTier tier) {
+        if (playerRef == null || !playerRef.isValid()) {
+            return;
+        }
+        ChunkTracker tracker = playerRef.getChunkTracker();
+        if (tracker == null) {
+            return;
+        }
+        UUID playerId = playerRef.getUuid();
+        int[] baseline = chunkBaselineByPlayer.computeIfAbsent(playerId,
+                ignored -> new int[]{tracker.getMaxChunksPerSecond(), tracker.getMaxChunksPerTick()});
+        int targetSec = ChunkThroughputModel.targetPerSecond(config, tier, baseline[0]);
+        int targetTick = ChunkThroughputModel.targetPerTick(config, tier, baseline[1]);
+        boolean holdout = HoldoutSet.isHoldout(playerId);
+
+        int currentSec = tracker.getMaxChunksPerSecond();
+        if (targetSec != currentSec && !(holdout && targetSec < currentSec)) {
+            tracker.setMaxChunksPerSecond(targetSec);
+        }
+        int currentTick = tracker.getMaxChunksPerTick();
+        if (targetTick != currentTick && !(holdout && targetTick < currentTick)) {
+            tracker.setMaxChunksPerTick(targetTick);
+        }
     }
 
     /** Motion boost is upward only and capped at maxClientViewRadius. */
