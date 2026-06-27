@@ -6,6 +6,7 @@ import com.durkz.leancore.diagnostics.DiagnosticLog;
 import com.durkz.leancore.probe.UnloadProbeGate;
 import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.runtime.WorldDispatch;
+import com.durkz.leancore.intelligence.LoadingPressureGate;
 import com.durkz.leancore.intelligence.UnloadOutcomeTracker;
 import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.component.Ref;
@@ -93,7 +94,7 @@ public class ZoneChunkUnloader {
             // may still be mutating counter[0] on the world thread; trusting it here would be a data
             // race and could over-report unloads.
             boolean done = WorldDispatch.run(world,
-                    () -> unloadOnWorld(world, zones, trackers, maxChunks, counter, unloadedZones));
+                    () -> unloadOnWorld(config, world, zones, trackers, maxChunks, counter, unloadedZones));
             if (done) {
                 unloaded += counter[0];
                 noteUnloadedZones(dormancyMap, unloadedZones, nowMs);
@@ -169,7 +170,7 @@ public class ZoneChunkUnloader {
             int[] counter = new int[1];
             Set<ZoneKey> unloadedZones = new HashSet<>();
             boolean done = WorldDispatch.run(world,
-                    () -> unloadOnWorld(world, zones, trackers, maxChunks, counter, unloadedZones));
+                    () -> unloadOnWorld(config, world, zones, trackers, maxChunks, counter, unloadedZones));
             if (done) {
                 unloaded += counter[0];
                 noteUnloadedZones(dormancyMap, unloadedZones, nowMs);
@@ -226,7 +227,22 @@ public class ZoneChunkUnloader {
         return trackers;
     }
 
+    /** Sum of in-flight chunk columns across a world's online players. World-thread read. */
+    private static int sumLoadingChunks(List<ChunkTracker> trackers) {
+        if (trackers == null || trackers.isEmpty()) {
+            return 0;
+        }
+        int loading = 0;
+        for (ChunkTracker tracker : trackers) {
+            if (tracker != null) {
+                loading += Math.max(0, tracker.getLoadingChunksCount());
+            }
+        }
+        return loading;
+    }
+
     private static void unloadOnWorld(
+            LeanCoreConfig config,
             World world,
             List<ZoneKey> zones,
             List<ChunkTracker> trackers,
@@ -236,6 +252,18 @@ public class ZoneChunkUnloader {
     ) {
         if (maxChunks <= 0) {
             return;
+        }
+        // Loading-pressure gate: while this world is still streaming chunks to its players, holding
+        // the unload sweep avoids fighting the engine loader (which would re-load what we removed).
+        // Runs on the world thread (caller dispatches), so the ChunkTracker reads are thread-safe.
+        if (config != null && config.loadingPressureSignalEnabled) {
+            int loadingBacklog = sumLoadingChunks(trackers);
+            if (LoadingPressureGate.holdsUnload(config, loadingBacklog)) {
+                DiagnosticLog.infoOnChange("unload-loading-gate",
+                        "unload held: " + loadingBacklog + " chunks streaming (> "
+                                + config.unloadHoldWhenLoadingAbove + ")");
+                return;
+            }
         }
         ChunkStore chunkStore = world.getChunkStore();
         int regionChunks = ZoneKey.regionChunks();

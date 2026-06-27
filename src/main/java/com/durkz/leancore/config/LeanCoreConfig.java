@@ -169,6 +169,13 @@ public class LeanCoreConfig {
     public int minHotLoadedChunksRadius = 2;
     public int maxHotLoadedChunksRadius = 8;
 
+    // Loading-pressure signal: hold unload sweeps for a world while it is actively streaming chunks
+    // to its players (join, teleport, sprint), so the governor does not fight the engine chunk loader
+    // and force just-sent chunks to reload. Backlog is the sum of in-flight columns across that
+    // world's ChunkTrackers (getLoadingChunksCount). On by default; it only ever delays unload.
+    public boolean loadingPressureSignalEnabled = true;
+    public int unloadHoldWhenLoadingAbove = 16;
+
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
     public boolean diagnosticLogEnabled = true;
@@ -269,6 +276,9 @@ public class LeanCoreConfig {
         }
         if (unloadMaxChunksPerSweep > MAX_UNLOAD_CHUNKS_CAP) {
             unloadMaxChunksPerSweep = MAX_UNLOAD_CHUNKS_CAP;
+        }
+        if (unloadHoldWhenLoadingAbove < 0) {
+            unloadHoldWhenLoadingAbove = 16;
         }
         sanitizeViewRadiusSettings();
         if (hudUpdateIntervalSeconds <= 0) {
