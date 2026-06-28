@@ -28,15 +28,43 @@ public final class ChunkThroughputModel {
         };
     }
 
+    /**
+     * Effective percentage including the COMFORT drain boost. When the player is actively streaming
+     * (backlog above the streaming threshold) and the tier is COMFORT, the rate is lifted to the
+     * drain-boost percentage to clear a join/teleport backlog faster. Other tiers are unaffected, so
+     * the boost only ever spends heap headroom.
+     */
+    public static int effectivePercent(LeanCoreConfig config, MemoryTier tier, int loadingBacklog) {
+        int base = percentForTier(config, tier);
+        if (config.chunkThroughputDrainBoostEnabled
+                && tier == MemoryTier.COMFORT
+                && loadingBacklog > Math.max(0, config.unloadHoldWhenLoadingAbove)) {
+            return Math.max(base, config.chunkThroughputDrainBoostPct);
+        }
+        return base;
+    }
+
     /** Target max chunks/second for a player whose engine baseline is {@code baselinePerSecond}. */
     public static int targetPerSecond(LeanCoreConfig config, MemoryTier tier, int baselinePerSecond) {
-        int scaled = (int) Math.round(baselinePerSecond * (percentForTier(config, tier) / 100.0D));
+        return targetPerSecond(config, tier, baselinePerSecond, 0);
+    }
+
+    public static int targetPerSecond(
+            LeanCoreConfig config, MemoryTier tier, int baselinePerSecond, int loadingBacklog) {
+        int scaled = (int) Math.round(
+                baselinePerSecond * (effectivePercent(config, tier, loadingBacklog) / 100.0D));
         return Math.max(MIN_CHUNKS_PER_SECOND, scaled);
     }
 
     /** Target max chunks/tick for a player whose engine baseline is {@code baselinePerTick}. */
     public static int targetPerTick(LeanCoreConfig config, MemoryTier tier, int baselinePerTick) {
-        int scaled = (int) Math.round(baselinePerTick * (percentForTier(config, tier) / 100.0D));
+        return targetPerTick(config, tier, baselinePerTick, 0);
+    }
+
+    public static int targetPerTick(
+            LeanCoreConfig config, MemoryTier tier, int baselinePerTick, int loadingBacklog) {
+        int scaled = (int) Math.round(
+                baselinePerTick * (effectivePercent(config, tier, loadingBacklog) / 100.0D));
         return Math.max(1, scaled);
     }
 }

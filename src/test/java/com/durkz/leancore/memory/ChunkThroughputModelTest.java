@@ -12,6 +12,9 @@ class ChunkThroughputModelTest {
         config.chunkThroughputComfortPct = 135;
         config.chunkThroughputTightPct = 70;
         config.chunkThroughputCriticalPct = 40;
+        config.chunkThroughputDrainBoostEnabled = true;
+        config.chunkThroughputDrainBoostPct = 200;
+        config.unloadHoldWhenLoadingAbove = 16;
         return config;
     }
 
@@ -60,5 +63,35 @@ class ChunkThroughputModelTest {
         assertEquals(2, ChunkThroughputModel.targetPerTick(config, MemoryTier.CRITICAL, baseline));
         // 40% of 1 rounds to 0, clamped up to 1 so loading never stalls.
         assertEquals(1, ChunkThroughputModel.targetPerTick(config, MemoryTier.CRITICAL, 1));
+    }
+
+    @Test
+    void drainBoostLiftsComfortWhenStreaming() {
+        LeanCoreConfig config = defaults();
+        // backlog above the streaming threshold, COMFORT -> drain-boost percent.
+        assertEquals(200, ChunkThroughputModel.effectivePercent(config, MemoryTier.COMFORT, 17));
+        assertEquals(72, ChunkThroughputModel.targetPerSecond(config, MemoryTier.COMFORT, 36, 17));
+    }
+
+    @Test
+    void drainBoostInactiveWithLowBacklog() {
+        LeanCoreConfig config = defaults();
+        assertEquals(135, ChunkThroughputModel.effectivePercent(config, MemoryTier.COMFORT, 16));
+        assertEquals(49, ChunkThroughputModel.targetPerSecond(config, MemoryTier.COMFORT, 36, 16));
+    }
+
+    @Test
+    void drainBoostOnlyAppliesInComfort() {
+        LeanCoreConfig config = defaults();
+        assertEquals(100, ChunkThroughputModel.effectivePercent(config, MemoryTier.WATCH, 999));
+        assertEquals(70, ChunkThroughputModel.effectivePercent(config, MemoryTier.TIGHT, 999));
+        assertEquals(40, ChunkThroughputModel.effectivePercent(config, MemoryTier.CRITICAL, 999));
+    }
+
+    @Test
+    void drainBoostRespectsDisableFlag() {
+        LeanCoreConfig config = defaults();
+        config.chunkThroughputDrainBoostEnabled = false;
+        assertEquals(135, ChunkThroughputModel.effectivePercent(config, MemoryTier.COMFORT, 999));
     }
 }

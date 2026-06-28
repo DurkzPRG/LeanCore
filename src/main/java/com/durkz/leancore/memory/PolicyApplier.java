@@ -462,8 +462,9 @@ public class PolicyApplier {
         UUID playerId = playerRef.getUuid();
         int[] baseline = chunkBaselineByPlayer.computeIfAbsent(playerId,
                 ignored -> new int[]{tracker.getMaxChunksPerSecond(), tracker.getMaxChunksPerTick()});
-        int targetSec = ChunkThroughputModel.targetPerSecond(config, tier, baseline[0]);
-        int targetTick = ChunkThroughputModel.targetPerTick(config, tier, baseline[1]);
+        int backlog = Math.max(0, tracker.getLoadingChunksCount());
+        int targetSec = ChunkThroughputModel.targetPerSecond(config, tier, baseline[0], backlog);
+        int targetTick = ChunkThroughputModel.targetPerTick(config, tier, baseline[1], backlog);
         boolean holdout = HoldoutSet.isHoldout(playerId);
 
         int currentSec = tracker.getMaxChunksPerSecond();

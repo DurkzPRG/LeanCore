@@ -187,6 +187,13 @@ public class LeanCoreConfig {
     public int chunkThroughputTightPct = 70;
     public int chunkThroughputCriticalPct = 40;
 
+    // Drain boost (rides on chunk-throughput governance): when a player is actively streaming (their
+    // in-flight backlog is above unloadHoldWhenLoadingAbove) AND the tier is COMFORT, raise their
+    // send-rate to this percentage of the baseline to clear a join/teleport backlog faster. Only ever
+    // applies with heap headroom and self-corrects once the tier leaves COMFORT.
+    public boolean chunkThroughputDrainBoostEnabled = true;
+    public int chunkThroughputDrainBoostPct = 200;
+
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
     public boolean diagnosticLogEnabled = true;
@@ -299,6 +306,9 @@ public class LeanCoreConfig {
         }
         if (chunkThroughputCriticalPct <= 0 || chunkThroughputCriticalPct > 100) {
             chunkThroughputCriticalPct = 40;
+        }
+        if (chunkThroughputDrainBoostPct < chunkThroughputComfortPct) {
+            chunkThroughputDrainBoostPct = Math.max(chunkThroughputComfortPct, 200);
         }
         sanitizeViewRadiusSettings();
         if (hudUpdateIntervalSeconds <= 0) {
