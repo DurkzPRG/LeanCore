@@ -8,6 +8,7 @@ import com.durkz.leancore.runtime.WorldDispatch;
 import com.durkz.leancore.intelligence.FalseCutTracker;
 import com.durkz.leancore.intelligence.HeuristicDemandModel;
 import com.durkz.leancore.intelligence.HoldoutSet;
+import com.durkz.leancore.intelligence.LoadingPressureGate;
 import com.durkz.leancore.intelligence.PlayerBehavior;
 import com.durkz.leancore.intelligence.RetentionDemand;
 import com.durkz.leancore.intelligence.ViewRadiusCache;
@@ -177,6 +178,20 @@ public class PolicyApplier {
         int current = player.getClientViewRadius();
         int target = targetRadius(player, policy, demand, profile);
 
+        // Streaming grace: while this player is actively streaming chunks, don't shrink their view
+        // radius (that would tell the client to drop chunks it is loading and re-request them).
+        // CRITICAL always cuts. Anchor at the held radius so the live motion path won't pull it down.
+        if (config.loadingPressureSignalEnabled && target < current
+                && LoadingPressureGate.holdsRadiusReduction(
+                        config, policy.tier(), loadingBacklog(playerRef), target, current)) {
+            if (viewRadiusCache != null) {
+                viewRadiusCache.noteBaseViewRadius(playerId, current);
+            }
+            DiagnosticLog.infoOnChange("streaming-radius-grace",
+                    "view/hot radius cut held during active chunk streaming");
+            return;
+        }
+
         // Anchor radius (without motion boost). The live motion sampler boosts on top of this.
         if (viewRadiusCache != null) {
             viewRadiusCache.noteBaseViewRadius(playerId, target);
@@ -316,6 +331,7 @@ public class PolicyApplier {
             return;
         }
         int target = HotRadiusGovernance.targetHotRadius(config, policy.viewScale());
+        boolean criticalCut = policy.tier() == MemoryTier.CRITICAL;
         DiagnosticLog.infoOnChange("hot-radius", String.format(Locale.ROOT,
                 "hot radius target=%d (max=%d min=%d viewScale=%.2f policy=%s)",
                 target, config.maxHotLoadedChunksRadius, config.minHotLoadedChunksRadius,
@@ -346,13 +362,13 @@ public class PolicyApplier {
                     return;
                 }
                 for (PlayerRef playerRef : batch) {
-                    applyHotRadiusOne(playerRef, target);
+                    applyHotRadiusOne(playerRef, target, criticalCut);
                 }
             });
         }
     }
 
-    private void applyHotRadiusOne(PlayerRef playerRef, int target) {
+    private void applyHotRadiusOne(PlayerRef playerRef, int target, boolean criticalCut) {
         if (playerRef == null || !playerRef.isValid()) {
             return;
         }
@@ -364,10 +380,22 @@ public class PolicyApplier {
         if (HoldoutSet.isHoldout(playerRef.getUuid()) && target < current) {
             return;
         }
+        // Streaming grace: hold the hot-radius cut while this player streams (unless CRITICAL).
+        if (config.loadingPressureSignalEnabled && !criticalCut && target < current
+                && LoadingPressureGate.holdsUnload(config, Math.max(0, tracker.getLoadingChunksCount()))) {
+            DiagnosticLog.infoOnChange("streaming-radius-grace",
+                    "view/hot radius cut held during active chunk streaming");
+            return;
+        }
         if (target == current) {
             return;
         }
         tracker.setMaxHotLoadedChunksRadius(target);
+    }
+
+    private static int loadingBacklog(PlayerRef playerRef) {
+        ChunkTracker tracker = playerRef.getChunkTracker();
+        return tracker == null ? 0 : Math.max(0, tracker.getLoadingChunksCount());
     }
 
     /**

@@ -169,10 +169,12 @@ public class LeanCoreConfig {
     public int minHotLoadedChunksRadius = 2;
     public int maxHotLoadedChunksRadius = 8;
 
-    // Loading-pressure signal: hold unload sweeps for a world while it is actively streaming chunks
-    // to its players (join, teleport, sprint), so the governor does not fight the engine chunk loader
-    // and force just-sent chunks to reload. Backlog is the sum of in-flight columns across that
-    // world's ChunkTrackers (getLoadingChunksCount). On by default; it only ever delays unload.
+    // Loading-pressure signal: use the in-flight chunk backlog (ChunkTracker getLoadingChunksCount)
+    // to avoid fighting the engine chunk loader while a world/player is actively streaming (join,
+    // teleport, sprint). It holds unload sweeps and holds view/hot-radius cuts during the burst, so
+    // just-sent chunks are not dropped and re-requested. CRITICAL pressure always overrides the
+    // radius grace. On by default; it only ever delays unload or a radius reduction. The threshold is
+    // the in-flight chunk count above which a world/player counts as actively streaming.
     public boolean loadingPressureSignalEnabled = true;
     public int unloadHoldWhenLoadingAbove = 16;
 
