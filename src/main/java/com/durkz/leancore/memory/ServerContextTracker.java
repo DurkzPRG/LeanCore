@@ -18,10 +18,10 @@ public class ServerContextTracker {
     private final LeanCoreConfig config;
     private final Deque<Double> samples = new ArrayDeque<>();
 
-    private double q50;
-    private double q75;
-    private double q90;
-    private double q97;
+    private volatile double q50;
+    private volatile double q75;
+    private volatile double q90;
+    private volatile double q97;
     private long lastRecomputeMs;
     private MemoryTier lastTier = MemoryTier.COMFORT;
 

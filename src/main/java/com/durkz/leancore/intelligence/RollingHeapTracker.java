@@ -12,20 +12,20 @@ public final class RollingHeapTracker {
 
     private final Deque<Sample> samples = new ArrayDeque<>();
 
-    public void add(double heapRatio, long nowMs) {
+    public synchronized void add(double heapRatio, long nowMs) {
         samples.addLast(new Sample(heapRatio, nowMs));
         prune(nowMs);
     }
 
-    public double avg60s(long nowMs) {
+    public synchronized double avg60s(long nowMs) {
         return avg(WINDOW_60S_MS, nowMs);
     }
 
-    double avg15m(long nowMs) {
+    synchronized double avg15m(long nowMs) {
         return avg(WINDOW_15M_MS, nowMs);
     }
 
-    double avg24h(long nowMs) {
+    synchronized double avg24h(long nowMs) {
         return avg(WINDOW_24H_MS, nowMs);
     }
 
