@@ -194,6 +194,13 @@ public class LeanCoreConfig {
     public boolean chunkThroughputDrainBoostEnabled = true;
     public int chunkThroughputDrainBoostPct = 200;
 
+    // Revisit keep-guard (anti-reload): never pick a zone for unload while its revisit likelihood is
+    // at or above this score, so zones the player almost certainly returns to soon (a base, a hub)
+    // are not unloaded and re-streamed. CRITICAL pressure overrides the guard. Needs the zone reuse
+    // model; only protects the highest-confidence zones, so the extra retained memory is small.
+    public boolean zoneRevisitKeepEnabled = true;
+    public double zoneRevisitKeepThreshold = 0.85D;
+
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
     public boolean diagnosticLogEnabled = true;
@@ -309,6 +316,9 @@ public class LeanCoreConfig {
         }
         if (chunkThroughputDrainBoostPct < chunkThroughputComfortPct) {
             chunkThroughputDrainBoostPct = Math.max(chunkThroughputComfortPct, 200);
+        }
+        if (zoneRevisitKeepThreshold <= 0.0D || zoneRevisitKeepThreshold > 1.0D) {
+            zoneRevisitKeepThreshold = 0.85D;
         }
         sanitizeViewRadiusSettings();
         if (hudUpdateIntervalSeconds <= 0) {

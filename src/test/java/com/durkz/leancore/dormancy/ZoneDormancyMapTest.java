@@ -264,4 +264,18 @@ class ZoneDormancyMapTest {
         map.refreshFromPlayerZones(List.of(), t + 10 * 60_000L);
         assertEquals(ZoneState.WARM, map.stateOf(frequent));
     }
+
+    @Test
+    void revisitGuardProtectsHighRevisitZonesExceptCritical() {
+        double threshold = 0.85D;
+        // High revisit, not critical -> protected.
+        assertTrue(ZoneDormancyMap.revisitProtects(true, MemoryTier.TIGHT, 0.90D, threshold));
+        assertTrue(ZoneDormancyMap.revisitProtects(true, MemoryTier.WATCH, 0.85D, threshold));
+        // CRITICAL always allows eviction.
+        assertFalse(ZoneDormancyMap.revisitProtects(true, MemoryTier.CRITICAL, 0.99D, threshold));
+        // Below the threshold -> not protected.
+        assertFalse(ZoneDormancyMap.revisitProtects(true, MemoryTier.TIGHT, 0.84D, threshold));
+        // Disabled -> not protected.
+        assertFalse(ZoneDormancyMap.revisitProtects(false, MemoryTier.TIGHT, 0.99D, threshold));
+    }
 }

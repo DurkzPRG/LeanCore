@@ -351,7 +351,8 @@ public class ZoneDormancyMap {
             }
             ZoneState state = entry.getValue();
             if (qualifiesForUnload(state, tier, minDormantUnloadTier)
-                    && !isProtectedByView(entry.getKey(), playerXZ)) {
+                    && !isProtectedByView(entry.getKey(), playerXZ)
+                    && !isProtectedByRevisit(entry.getKey(), tier, now)) {
                 ranked.add(Map.entry(entry.getKey(), evictionPriority(entry.getKey(), playerXZ, now)));
             }
         }
@@ -384,6 +385,29 @@ public class ZoneDormancyMap {
             demoted++;
         }
         return demoted;
+    }
+
+    /**
+     * Anti-reload guard: keep a zone out of the unload candidate set while its revisit likelihood is
+     * at or above the keep threshold, so a base/hub the player almost certainly returns to is not
+     * unloaded and re-streamed. CRITICAL pressure overrides it. No-op without the reuse model.
+     */
+    private boolean isProtectedByRevisit(ZoneKey key, MemoryTier tier, long nowMs) {
+        ZoneReuseModel reuse = this.reuseModel;
+        if (!config.zoneReuseModelEnabled || reuse == null) {
+            return false;
+        }
+        return revisitProtects(
+                config.zoneRevisitKeepEnabled, tier, reuse.revisitScore(key, nowMs),
+                config.zoneRevisitKeepThreshold);
+    }
+
+    /** Pure keep-guard decision: protect high-revisit zones from unload, except under CRITICAL. */
+    static boolean revisitProtects(boolean enabled, MemoryTier tier, double revisitScore, double threshold) {
+        if (!enabled || tier == MemoryTier.CRITICAL) {
+            return false;
+        }
+        return revisitScore >= threshold;
     }
 
     /**
