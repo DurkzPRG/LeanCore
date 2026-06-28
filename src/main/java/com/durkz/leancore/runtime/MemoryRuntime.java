@@ -17,6 +17,7 @@ import com.durkz.leancore.probe.RegionalEntityProbe;
 import com.durkz.leancore.memory.GcHintScheduler;
 import com.durkz.leancore.memory.GovernorStatus;
 import com.durkz.leancore.memory.MemoryGovernor;
+import com.durkz.leancore.memory.MemoryTier;
 import com.durkz.leancore.memory.MemoryPressureSensor;
 import com.durkz.leancore.memory.MemorySnapshot;
 import com.durkz.leancore.memory.SessionSavingsTracker;
@@ -24,6 +25,7 @@ import com.durkz.leancore.memory.PolicyApplier;
 import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
+import com.durkz.leancore.probe.ChunkPrefetcher;
 import com.durkz.leancore.probe.ChunkSaturationSampler;
 import com.durkz.leancore.probe.RegionalPressureCache;
 import com.durkz.leancore.ui.HudSessionStore;
@@ -71,6 +73,7 @@ public class MemoryRuntime {
     private final LoadedChunkSetTracker loadedChunkSetTracker = new LoadedChunkSetTracker();
     private final GcHintScheduler gcHintScheduler;
     private ChunkSaturationSampler chunkSaturationSampler;
+    private ChunkPrefetcher chunkPrefetcher;
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -169,6 +172,7 @@ public class MemoryRuntime {
         running = true;
         liteSessionStartedMs = System.currentTimeMillis();
         chunkSaturationSampler = new ChunkSaturationSampler(() -> Universe.get().getPlayers());
+        chunkPrefetcher = new ChunkPrefetcher(config, classifier.features());
         int playerCount = Universe.get().getPlayers().size();
         activeProfile = RuntimeActivationPolicy.resolveProfile(config, playerCount);
         if (activeProfile == null) {
@@ -582,6 +586,33 @@ public class MemoryRuntime {
         if (RuntimeGuard.active() && profile.runsHud(config) && hudService != null) {
             hudService.refresh(this);
         }
+
+        maybePrefetchChunks(batches, sample.tier());
+    }
+
+    /**
+     * Predictive chunk prefetch (Frente C2): only ever runs with heap headroom (COMFORT), once enabled.
+     * Each world warms a few chunks ahead of its moving players on its own thread, bounded by the
+     * fan-out budget so a stalled world can never monopolise the tick.
+     */
+    private void maybePrefetchChunks(List<WorldBatch> batches, MemoryTier tier) {
+        if (!config.chunkPrefetchEnabled || tier != MemoryTier.COMFORT || chunkPrefetcher == null) {
+            return;
+        }
+        long deadlineNs = System.nanoTime() + FAN_OUT_BUDGET_NANOS;
+        for (WorldBatch batch : batches) {
+            if (System.nanoTime() > deadlineNs) {
+                break;
+            }
+            WorldDispatch.run(batch.world(), () -> {
+                GovernorWorldContext.enter(batch.worldUuid());
+                try {
+                    chunkPrefetcher.prefetchOnWorld(batch.world(), batch.players());
+                } finally {
+                    GovernorWorldContext.exit();
+                }
+            });
+        }
     }
 
     /** Online players grouped by their alive world, so per-player work runs on the right thread. */
@@ -788,6 +819,8 @@ public class MemoryRuntime {
         if (govStatus.enabled()) {
             sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
         }
+
+        maybePrefetchChunks(batches, sample.tier());
     }
 
     private double sampleChunkSaturation() {

@@ -201,6 +201,14 @@ public class LeanCoreConfig {
     public boolean zoneRevisitKeepEnabled = true;
     public double zoneRevisitKeepThreshold = 0.85D;
 
+    // Predictive chunk prefetch (experimental, off by default): warms a few chunks just beyond the
+    // view edge along a moving player's predicted heading, so revisited/already-generated terrain is
+    // resident on arrival. Uses NO_GENERATE (disk only, no worldgen) and never ticks the chunk; only
+    // runs in COMFORT, capped per tick, skipping chunks already loaded or on load-failure backoff.
+    public boolean chunkPrefetchEnabled = false;
+    public int chunkPrefetchMaxPerTick = 4;
+    public long chunkPrefetchHorizonMs = 3000L;
+
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
     public boolean diagnosticLogEnabled = true;
@@ -319,6 +327,12 @@ public class LeanCoreConfig {
         }
         if (zoneRevisitKeepThreshold <= 0.0D || zoneRevisitKeepThreshold > 1.0D) {
             zoneRevisitKeepThreshold = 0.85D;
+        }
+        if (chunkPrefetchMaxPerTick < 0 || chunkPrefetchMaxPerTick > 32) {
+            chunkPrefetchMaxPerTick = 4;
+        }
+        if (chunkPrefetchHorizonMs < 500L) {
+            chunkPrefetchHorizonMs = 3000L;
         }
         sanitizeViewRadiusSettings();
         if (hudUpdateIntervalSeconds <= 0) {
