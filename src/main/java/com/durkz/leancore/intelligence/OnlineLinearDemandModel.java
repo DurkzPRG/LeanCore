@@ -7,10 +7,18 @@ import java.util.UUID;
 
 public class OnlineLinearDemandModel implements DemandModel {
 
+    // SGD step size for the demand weights. Kept small so a single noisy outcome can't swing the model.
     private static final double LEARNING_RATE = 0.08D;
+    // Ridge term: pulls weights toward 0 each step so unused features decay instead of drifting.
     private static final double RIDGE = 0.02D;
+    // Per-update decay (~0.05%/step). Slowly forgets old data so the model tracks how play changes
+    // over a long session without a hard reset.
     private static final double WEIGHT_DECAY = 0.9995D;
+    // Lower bound on how much we trust the learned demand vs the heuristic, even at low confidence,
+    // so the learned signal is never fully ignored once it's warmed up.
     private static final double MIN_BLEND = 0.35D;
+    // Outcomes to collect before blending the learned model in; below this we return the heuristic only.
+    private static final int WARMUP_UPDATES = 8;
 
     private final HeuristicDemandModel heuristic = new HeuristicDemandModel();
     private final double[] weights = new double[FeatureSchema.DEMAND_DIM];
@@ -38,7 +46,7 @@ public class OnlineLinearDemandModel implements DemandModel {
             long nowMs
     ) {
         Map<UUID, RetentionDemand> baseline = heuristic.estimate(features, debugLabels, nowMs);
-        if (updates < 8) {
+        if (updates < WARMUP_UPDATES) {
             return baseline;
         }
 

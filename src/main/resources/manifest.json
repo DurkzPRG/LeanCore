@@ -1,8 +1,8 @@
 {
     "Group": "durkz",
     "Name": "LeanCore",
-    "Version": "1.6.1",
-    "Description": "Adaptive RAM governance for solo worlds, friends co-op, and large servers. Spatial dormancy, predictive zone retention, and behavior-weighted memory footprints.",
+    "Version": "1.7.0",
+    "Description": "Server-side memory governor for Hytale. Unloads idle map regions, trims view radius under heap pressure, and learns which zones get revisited so it keeps the ones you actually use.",
     "Authors": [
         {
             "Name": "Durkz"

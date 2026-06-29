@@ -14,9 +14,15 @@ On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK ch
 
 Requires Hytale server **>=0.5.6**.
 
+## Status
+
+Works and is in daily use on solo and small co-op worlds. Treat it as functional but still maturing: Hytale is in early access, so the server API can change between versions, and the heap/chunk wins depend a lot on your world (entity density, how much you build, how many chunks stay loaded). The numbers in `/leancore savings` are measured per session; I have not run a controlled large-server benchmark yet, so the comparison below is illustrative, not a published result.
+
 ## With vs without LeanCore
 
 Same solo session, server RAM over time. Without the mod, every area you visit stays resident and heap only climbs until you restart. With LeanCore, idle areas cool down and release, so RAM rises under load and then settles back.
+
+The shape below is illustrative (it shows the intended behavior), not a benchmark. For real numbers on your setup, watch `/leancore savings` over a session.
 
 ```
 Server RAM over a long session   (taller bars = more RAM in use)
@@ -184,6 +190,16 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 1. Solo world: `/leancore status` shows `profile LITE`, `lite governor ON` in savings after ~60s
 2. Mine ore, then `/leancore learn player` shows `MINER` and demand/viewScale
 3. Friend joins → log shows `profile LITE -> STANDARD`
+
+## Known limitations
+
+- It does not replace manual server tuning. It helps with memory growth from idle regions; it does not fix CPU-bound tick lag.
+- Gains depend on the world. A small, mostly-static world has little to reclaim, so you may see almost no difference.
+- The learning model needs a session or two of real play before its retention and demand signals are useful. Fresh installs lean on the heuristics.
+- It targets memory and chunk pressure. It does not promise higher FPS; client frame rate depends on the renderer, not the server heap.
+- `motionViewRadiusBoostEnabled` is off by default: rewriting view radius every tick churns chunk loading on the current engine.
+- Policy chunk unload (`unloadEnabled`) stays off until you run `/leancore probe`, because it depends on server internals that can shift between Hytale versions.
+- Built against and tested on the versions noted above. Future Hytale updates may change the APIs the probe relies on.
 
 ## Build
 

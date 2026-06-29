@@ -13,10 +13,26 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PolicyBandit {
 
     public static final int CONTEXT_DIM = 7;
+
+    // LinUCB exploration weight. Higher = explore high-variance arms more. 0.6 was a good middle
+    // ground in dogfood: lower and it locks onto the first decent arm, higher and it keeps probing
+    // even under sustained pressure.
     private static final double ALPHA = 0.6D;
+    // Floor for the diagonal of A so a barely-pulled arm can't divide by ~0 and blow up the score.
     private static final double MIN_A = 0.05D;
+    // Only start ignoring an arm after this many pulls, so we don't write it off on noise.
     private static final double DEPRIORITIZE_PULLS = 8.0D;
+    // Mean reward below which a well-pulled arm is treated as harmful and skipped.
     private static final double DEPRIORITIZE_MEAN = -0.08D;
+    // Optimistic score for an arm we've never pulled, so each arm gets tried at least once.
+    private static final double UNPULLED_ARM_SCORE = 5.0D;
+
+    // Context features are normalized to roughly [0,1] before going into the model. These scales set
+    // what counts as "maxed out" for each raw signal.
+    private static final double CONTEXT_PLAYER_SCALE = 32.0D;   // online players: saturates near a full server
+    private static final double CONTEXT_SPREAD_SCALE = 1000.0D; // player spread in blocks (~31x31 chunks)
+    private static final double CONTEXT_STALENESS_SCALE = 300.0D; // seconds since last policy change (5 min)
+    private static final double CONTEXT_TIER_SCALE = 3.0D;      // MemoryTier ordinal range (COMFORT..CRITICAL)
 
     private final Map<String, ArmState> arms = new ConcurrentHashMap<>();
 
@@ -127,11 +143,11 @@ public class PolicyBandit {
     ) {
         return new double[]{
                 sample.heapUsedRatio() - heapBaseline,
-                Math.min(1.0D, sample.onlinePlayers() / 32.0D),
+                Math.min(1.0D, sample.onlinePlayers() / CONTEXT_PLAYER_SCALE),
                 Math.max(0.0D, Math.min(1.0D, meanDemand)),
-                Math.min(1.0D, sample.playerSpreadBlocks() / 1000.0D),
-                Math.min(1.0D, secondsSinceChange / 300.0D),
-                pressureTier.ordinal() / 3.0D,
+                Math.min(1.0D, sample.playerSpreadBlocks() / CONTEXT_SPREAD_SCALE),
+                Math.min(1.0D, secondsSinceChange / CONTEXT_STALENESS_SCALE),
+                pressureTier.ordinal() / CONTEXT_TIER_SCALE,
                 Math.max(0.0D, Math.min(1.0D, regionalPressure))
         };
     }
@@ -139,7 +155,7 @@ public class PolicyBandit {
     private double ucb(String armKey, double[] context) {
         ArmState arm = arms.computeIfAbsent(armKey, ignored -> new ArmState());
         if (arm.pulls <= 0) {
-            return 5.0D;
+            return UNPULLED_ARM_SCORE;
         }
         double exploit = 0.0D;
         double explore = 0.0D;

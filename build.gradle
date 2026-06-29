@@ -57,6 +57,10 @@ dependencies {
         }
     }
 
+    // Gson is used by the main code (LeanCoreConfig) but is not declared as an implementation
+    // dependency on purpose: at runtime the Hytale server provides Gson on the mod classpath, and
+    // at compile time it comes from HytaleServer.jar above. We only add it here so unit tests, which
+    // run outside the server, still have Gson available.
     testImplementation 'com.google.code.gson:gson:2.11.0'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
