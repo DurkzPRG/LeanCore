@@ -15,7 +15,7 @@ class ApiProbeTest {
                 "probe:",
                 "S1 view-radius: ok server=16 client=16 write=setClientViewRadius",
                 "S2 position: ok 0 64 0 world=abc",
-                "S3 chunks: ok loaded=10 loading=0 raw=0 norm=0.0 view=16 budget=1024",
+                "S3 chunks: ok loadedSections=10 loadingSections=0 raw=0 norm=0.0 view=16 budget=1024",
                 "S4 entities: ok nearby=0",
                 "S5 unload: ok api=ChunkStore.remove(UNLOAD) candidates=0 lastUnloaded=0 storeLoaded=100"
         );

@@ -24,6 +24,7 @@ public final class PlayerSpatialProbe {
         int loaded = 0;
         int loading = 0;
         if (tracker != null) {
+            // Section counts (0.6). SpatialSample field names stay loadedChunks/loadingChunks.
             loaded = Math.max(0, tracker.getLoadedSectionsCount());
             loading = Math.max(0, tracker.getLoadingSectionsCount());
         }

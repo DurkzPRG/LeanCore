@@ -97,10 +97,10 @@ public final class ApiProbe {
         if (player != null) {
             viewRadius = Math.max(player.getViewRadius(), player.getClientViewRadius());
         }
-        int budget = ChunkPressureModel.viewChunkBudget(viewRadius);
+        int budget = ChunkPressureModel.viewSectionBudget(viewRadius);
         double normalized = sample.normalizedPressure(viewRadius, -1);
         return String.format(Locale.ROOT,
-                "S3 chunks: ok loaded=%d loading=%d raw=%.0f norm=%.1f view=%d budget=%d",
+                "S3 chunks: ok loadedSections=%d loadingSections=%d raw=%.0f norm=%.1f view=%d budget=%d",
                 sample.loadedChunks(),
                 sample.loadingChunks(),
                 sample.rawPressure(),

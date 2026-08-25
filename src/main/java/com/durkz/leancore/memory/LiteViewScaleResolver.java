@@ -3,7 +3,7 @@ package com.durkz.leancore.memory;
 import com.durkz.leancore.config.LeanCoreConfig;
 
 /**
- * LITE solo view-scale from heap tier and chunk saturation (loaded / view budget).
+ * LITE solo view-scale from heap tier and section saturation (loaded sections / 3D view budget).
  * Demand {@link com.durkz.leancore.intelligence.RetentionDemand#viewScale()} is applied later in {@link PolicyApplier}.
  */
 public final class LiteViewScaleResolver {

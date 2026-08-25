@@ -13,7 +13,7 @@ import java.util.Collection;
 import java.util.function.Supplier;
 
 /**
- * Max loaded-chunk saturation (loaded / view budget) across online players.
+ * Max loaded-section saturation (loaded sections / 3D view budget) across online players.
  * Must run on the world thread (reads {@link Player} view radius).
  */
 public final class ChunkSaturationSampler {
@@ -44,7 +44,7 @@ public final class ChunkSaturationSampler {
             boolean done = WorldDispatch.run(world, () -> {
                 PlayerSpatialProbe.SpatialSample spatial = PlayerSpatialProbe.readChunks(playerRef);
                 int viewRadius = readServerViewRadius(playerRef);
-                int budget = Math.max(1, ChunkPressureModel.viewChunkBudget(viewRadius));
+                int budget = Math.max(1, ChunkPressureModel.viewSectionBudget(viewRadius));
                 saturation[0] = Math.min(1.0D, (double) spatial.loadedChunks() / budget);
             });
             if (done) {
