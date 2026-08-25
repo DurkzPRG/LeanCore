@@ -568,6 +568,7 @@ public class MemoryRuntime {
             if (govStatus.enabled()) {
                 sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
             }
+            noteEngineUnloadYieldIfNeeded();
             double reward = learningStore.outcomeTracker().pollCompletedReward();
             if (!Double.isNaN(reward)) {
                 learningStore.reinforceDemandOnReward(
@@ -819,8 +820,15 @@ public class MemoryRuntime {
         if (govStatus.enabled()) {
             sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
         }
+        noteEngineUnloadYieldIfNeeded();
 
         maybePrefetchChunks(batches, sample.tier());
+    }
+
+    private void noteEngineUnloadYieldIfNeeded() {
+        if (zoneChunkUnloader != null && zoneChunkUnloader.lastSweepYieldedToEngine()) {
+            sessionSavings.noteEngineUnloadYield();
+        }
     }
 
     private double sampleChunkSaturation() {

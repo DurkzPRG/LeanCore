@@ -266,6 +266,33 @@ class SavingsReportTest {
         assertTrue(output.contains("profile STANDARD"));
     }
 
+    @Test
+    void reportsEngineUnloadYield() {
+        SessionSavingsTracker session = new SessionSavingsTracker();
+        long now = System.currentTimeMillis();
+        session.noteHeapSample(mb(2000), mb(4000), now);
+        session.noteEngineUnloadYield();
+        session.noteEngineUnloadYield();
+
+        LeanCoreConfig config = new LeanCoreConfig();
+        MemorySnapshot current = new MemorySnapshot(mb(3600), mb(4000), 0.90D, 1, 0.0D, MemoryTier.CRITICAL);
+        String output = join(SavingsReport.format(
+                current,
+                session,
+                GovernorStatus.idle(),
+                config,
+                RuntimeProfile.LITE,
+                new UnloadOutcomeTracker(),
+                new GcHintScheduler(config),
+                0L,
+                0L,
+                now + 1000L
+        ));
+
+        assertTrue(output.contains("policy unload yielded to engine"));
+        assertTrue(output.contains("2 ticks"));
+    }
+
     private static String join(java.util.List<SavingsReport.Line> lines) {
         StringBuilder builder = new StringBuilder();
         for (SavingsReport.Line line : lines) {

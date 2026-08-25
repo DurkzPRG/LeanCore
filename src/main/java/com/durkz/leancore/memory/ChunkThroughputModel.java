@@ -4,8 +4,8 @@ import com.durkz.leancore.config.LeanCoreConfig;
 
 /**
  * Adaptive chunk-throughput math. Turns a memory tier into a target chunk send-rate, expressed as a
- * percentage of the player's connection-aware engine baseline (local 256 / LAN 128 / remote 36 per
- * second, and 4 per tick). WATCH always returns the baseline (100%); COMFORT speeds loading up,
+ * percentage of the player's connection-aware engine baseline (local 2560 / LAN 1280 / remote 360 per
+ * second, and 40 per tick). WATCH always returns the baseline (100%); COMFORT speeds loading up,
  * TIGHT and CRITICAL throttle it down. Pure math, no engine access; the baseline is captured per
  * player on the world thread by {@code PolicyApplier}.
  */
@@ -14,6 +14,10 @@ public final class ChunkThroughputModel {
     // Never throttle the per-second rate below this. setMaxSectionsPerSecond divides by the value, so it
     // must stay well clear of zero, and the streaming must not stall even under critical pressure.
     static final int MIN_CHUNKS_PER_SECOND = 8;
+
+    // Engine local cap (ChunkTracker.MAX_SECTIONS_PER_SECOND_LOCAL). Drain boost must not exceed this.
+    static final int MAX_SECTIONS_PER_SECOND = 2560;
+    static final int MAX_SECTIONS_PER_TICK = 40;
 
     private ChunkThroughputModel() {
     }
@@ -53,7 +57,7 @@ public final class ChunkThroughputModel {
             LeanCoreConfig config, MemoryTier tier, int baselinePerSecond, int loadingBacklog) {
         int scaled = (int) Math.round(
                 baselinePerSecond * (effectivePercent(config, tier, loadingBacklog) / 100.0D));
-        return Math.max(MIN_CHUNKS_PER_SECOND, scaled);
+        return Math.min(MAX_SECTIONS_PER_SECOND, Math.max(MIN_CHUNKS_PER_SECOND, scaled));
     }
 
     /** Target max chunks/tick for a player whose engine baseline is {@code baselinePerTick}. */
@@ -65,6 +69,6 @@ public final class ChunkThroughputModel {
             LeanCoreConfig config, MemoryTier tier, int baselinePerTick, int loadingBacklog) {
         int scaled = (int) Math.round(
                 baselinePerTick * (effectivePercent(config, tier, loadingBacklog) / 100.0D));
-        return Math.max(1, scaled);
+        return Math.min(MAX_SECTIONS_PER_TICK, Math.max(1, scaled));
     }
 }

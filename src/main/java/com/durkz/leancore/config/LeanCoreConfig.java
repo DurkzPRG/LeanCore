@@ -180,7 +180,7 @@ public class LeanCoreConfig {
 
     // Adaptive chunk throughput: scales each player's section send-rate (ChunkTracker maxSectionsPerSecond
     // / maxSectionsPerTick) by memory tier, as a percentage of that player's connection-aware engine
-    // baseline (local 256 / LAN 128 / remote 36 per second). Speeds loading when heap is roomy and
+    // baseline (local 2560 / LAN 1280 / remote 360 per second). Speeds loading when heap is roomy and
     // throttles it under pressure. Off by default; WATCH always stays at 100% of the baseline.
     public boolean chunkThroughputGovernanceEnabled = false;
     public int chunkThroughputComfortPct = 135;

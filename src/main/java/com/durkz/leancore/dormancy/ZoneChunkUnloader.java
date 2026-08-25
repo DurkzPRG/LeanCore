@@ -34,15 +34,32 @@ public class ZoneChunkUnloader {
 
     private volatile int lastUnloadedChunks;
     private volatile int lastCandidateZones;
+    private volatile boolean lastSweepYieldedToEngine;
+    private volatile int engineUnloadYields;
     private long lastSweepMs;
     private long lastProbeGateLogMs;
+
+    /** Same threshold as engine {@code ChunkUnloadingSystem.DESPERATE_UNLOAD_RAM_USAGE_THRESHOLD}. */
+    public static final double ENGINE_DESPERATE_HEAP_RATIO = 0.85D;
 
     public ZoneChunkUnloader(LeanCoreConfig config, UnloadOutcomeTracker unloadOutcomeTracker) {
         this.config = config;
         this.unloadOutcomeTracker = unloadOutcomeTracker;
     }
 
+    public static boolean engineOwnsUnload(double heapUsedRatio) {
+        return heapUsedRatio >= ENGINE_DESPERATE_HEAP_RATIO;
+    }
+
     public int sweep(ZoneDormancyMap dormancyMap, MemoryTier tier) {
+        return sweep(dormancyMap, tier, 0.0D);
+    }
+
+    public int sweep(ZoneDormancyMap dormancyMap, MemoryTier tier, double heapUsedRatio) {
+        lastSweepYieldedToEngine = false;
+        if (yieldToEngine(heapUsedRatio)) {
+            return 0;
+        }
         if (!RuntimeGuard.active() || !config.enabled || !config.governEnabled || !config.unloadEnabled) {
             return 0;
         }
@@ -117,6 +134,14 @@ public class ZoneChunkUnloader {
     }
 
     public int sweepLite(ZoneDormancyMap dormancyMap, MemoryTier tier, long playerIdleSec) {
+        return sweepLite(dormancyMap, tier, playerIdleSec, 0.0D);
+    }
+
+    public int sweepLite(ZoneDormancyMap dormancyMap, MemoryTier tier, long playerIdleSec, double heapUsedRatio) {
+        lastSweepYieldedToEngine = false;
+        if (yieldToEngine(heapUsedRatio)) {
+            return 0;
+        }
         if (!config.enabled || !config.liteUnloadEnabled) {
             return 0;
         }
@@ -208,6 +233,27 @@ public class ZoneChunkUnloader {
 
     public int lastCandidateZones() {
         return lastCandidateZones;
+    }
+
+    public boolean lastSweepYieldedToEngine() {
+        return lastSweepYieldedToEngine;
+    }
+
+    public int engineUnloadYields() {
+        return engineUnloadYields;
+    }
+
+    private boolean yieldToEngine(double heapUsedRatio) {
+        if (!engineOwnsUnload(heapUsedRatio)) {
+            return false;
+        }
+        lastSweepYieldedToEngine = true;
+        engineUnloadYields++;
+        lastUnloadedChunks = 0;
+        lastCandidateZones = 0;
+        DiagnosticLog.infoOnChange("engine-unload-yield",
+                "policy unload skipped: engine desperate unload owns heap >= 85%");
+        return true;
     }
 
     private static List<ChunkTracker> collectTrackers(UUID worldUuid) {

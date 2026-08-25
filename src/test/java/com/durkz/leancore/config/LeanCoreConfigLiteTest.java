@@ -3,6 +3,7 @@ package com.durkz.leancore.config;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LeanCoreConfigLiteTest {
@@ -20,6 +21,9 @@ class LeanCoreConfigLiteTest {
         assertEquals(0.97D, config.liteViewComfortCapScale, 0.001D);
         assertEquals(8, config.liteUnloadMaxChunksPerSweep);
         assertEquals(180, config.liteUnloadIdleSeconds);
+        assertFalse(config.chunkThroughputGovernanceEnabled);
+        assertFalse(config.motionViewRadiusBoostEnabled);
+        assertFalse(config.chunkPrefetchEnabled);
     }
 
     @Test

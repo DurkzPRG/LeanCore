@@ -89,6 +89,25 @@ class ChunkThroughputModelTest {
     }
 
     @Test
+    void drainBoostOnLocalBaselineDoesNotExceedEngineCap() {
+        LeanCoreConfig config = defaults();
+        int local = 2560;
+        assertEquals(ChunkThroughputModel.MAX_SECTIONS_PER_SECOND,
+                ChunkThroughputModel.targetPerSecond(config, MemoryTier.COMFORT, local, 17));
+        assertEquals(ChunkThroughputModel.MAX_SECTIONS_PER_TICK,
+                ChunkThroughputModel.targetPerTick(config, MemoryTier.COMFORT, 40, 17));
+    }
+
+    @Test
+    void remoteThreeSixtyScalesUnderCap() {
+        LeanCoreConfig config = defaults();
+        int remote = 360;
+        assertEquals(486, ChunkThroughputModel.targetPerSecond(config, MemoryTier.COMFORT, remote));
+        assertEquals(360, ChunkThroughputModel.targetPerSecond(config, MemoryTier.WATCH, remote));
+        assertEquals(144, ChunkThroughputModel.targetPerSecond(config, MemoryTier.CRITICAL, remote));
+    }
+
+    @Test
     void drainBoostRespectsDisableFlag() {
         LeanCoreConfig config = defaults();
         config.chunkThroughputDrainBoostEnabled = false;

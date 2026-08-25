@@ -18,6 +18,7 @@ public final class SessionSavingsTracker {
 
     private int cumulativeDemotedZones;
     private int cumulativeReclaimedMbEstimate;
+    private int engineUnloadYields;
     private boolean governorEverActive;
     private long firstGovernorActiveMs;
 
@@ -88,6 +89,14 @@ public final class SessionSavingsTracker {
 
     public int cumulativeReclaimedMbEstimate() {
         return cumulativeReclaimedMbEstimate;
+    }
+
+    public void noteEngineUnloadYield() {
+        engineUnloadYields++;
+    }
+
+    public int engineUnloadYields() {
+        return engineUnloadYields;
     }
 
     public boolean governorEverActive() {

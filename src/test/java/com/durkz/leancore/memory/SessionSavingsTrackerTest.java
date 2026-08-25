@@ -32,6 +32,14 @@ class SessionSavingsTrackerTest {
         assertTrue(tracker.governorEverActive());
     }
 
+    @Test
+    void countsEngineUnloadYields() {
+        SessionSavingsTracker tracker = new SessionSavingsTracker();
+        tracker.noteEngineUnloadYield();
+        tracker.noteEngineUnloadYield();
+        assertEquals(2, tracker.engineUnloadYields());
+    }
+
     private static long mb(int megabytes) {
         return megabytes * 1024L * 1024L;
     }

@@ -169,6 +169,11 @@ public final class SavingsReport {
                 "chunks unloaded (policy): %d  |  chunks evicted (engine): %d",
                 policyUnloads,
                 engineUnloads), "#AAAAAA"));
+        if (session.engineUnloadYields() > 0) {
+            lines.add(new Line(String.format(Locale.ROOT,
+                    "policy unload yielded to engine (>=85%% heap): %d ticks",
+                    session.engineUnloadYields()), "#FFAA00"));
+        }
         if (liteProfile) {
             if (config.liteUnloadEnabled) {
                 lines.add(new Line(

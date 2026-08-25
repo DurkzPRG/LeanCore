@@ -84,7 +84,7 @@ public class MemoryGovernor {
             }
         }
 
-        int unloadedChunks = zoneChunkUnloader.sweep(dormancyMap, sample.tier());
+        int unloadedChunks = zoneChunkUnloader.sweep(dormancyMap, sample.tier(), sample.heapUsedRatio());
 
         GovernorPolicy toApply = choosePolicy(pressurePolicy, preset, sample, demands);
         int scheduled = 0;
@@ -168,7 +168,7 @@ public class MemoryGovernor {
             }
         }
 
-        int unloadedChunks = zoneChunkUnloader.sweepLite(dormancyMap, sample.tier(), playerIdleSec);
+        int unloadedChunks = zoneChunkUnloader.sweepLite(dormancyMap, sample.tier(), playerIdleSec, sample.heapUsedRatio());
 
         long since = lastChangeMs <= 0L ? 0L : (nowMs - lastChangeMs) / 1000L;
         lastStatus = new GovernorStatus(
