@@ -4,7 +4,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
 
 /**
  * Hot/simulation radius policy application rules (v1.7.0 Frente C). Mirrors
- * {@link ViewRadiusGovernance} but for {@code ChunkTracker.setMaxHotLoadedChunksRadius} (the ticking
+ * {@link ViewRadiusGovernance} but for {@code ChunkTracker.setMaxHotLoadedRadius} (the ticking
  * radius), which only affects server-side simulation cost and has no client view pop-in. Off by
  * default; respects the same grace window as the view-radius governor.
  */

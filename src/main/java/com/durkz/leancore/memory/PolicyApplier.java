@@ -320,7 +320,7 @@ public class PolicyApplier {
     }
 
     /**
-     * Hot/simulation radius actuator (v1.7.0 Frente C). Drives {@code setMaxHotLoadedChunksRadius}
+     * Hot/simulation radius actuator (v1.7.0 Frente C). Drives {@code setMaxHotLoadedRadius}
      * (ticking radius) from the active policy, cutting simulation cost without the view-radius
      * pop-in. Runs on each player's world thread; shrinks are skipped for holdout players so the
      * cohort comparison stays clean. No-op unless {@code hotRadiusGovernanceEnabled}.
@@ -376,13 +376,13 @@ public class PolicyApplier {
         if (tracker == null) {
             return;
         }
-        int current = tracker.getMaxHotLoadedChunksRadius();
+        int current = tracker.getMaxHotLoadedRadius();
         if (HoldoutSet.isHoldout(playerRef.getUuid()) && target < current) {
             return;
         }
         // Streaming grace: hold the hot-radius cut while this player streams (unless CRITICAL).
         if (config.loadingPressureSignalEnabled && !criticalCut && target < current
-                && LoadingPressureGate.holdsUnload(config, Math.max(0, tracker.getLoadingChunksCount()))) {
+                && LoadingPressureGate.holdsUnload(config, Math.max(0, tracker.getLoadingSectionsCount()))) {
             DiagnosticLog.infoOnChange("streaming-radius-grace",
                     "view/hot radius cut held during active chunk streaming");
             return;
@@ -390,17 +390,17 @@ public class PolicyApplier {
         if (target == current) {
             return;
         }
-        tracker.setMaxHotLoadedChunksRadius(target);
+        tracker.setMaxHotLoadedRadius(target);
     }
 
     private static int loadingBacklog(PlayerRef playerRef) {
         ChunkTracker tracker = playerRef.getChunkTracker();
-        return tracker == null ? 0 : Math.max(0, tracker.getLoadingChunksCount());
+        return tracker == null ? 0 : Math.max(0, tracker.getLoadingSectionsCount());
     }
 
     /**
      * Adaptive chunk-throughput actuator. Scales each player's chunk send-rate
-     * ({@code setMaxChunksPerSecond} / {@code setMaxChunksPerTick}) by memory tier, as a percentage
+     * ({@code setMaxSectionsPerSecond} / {@code setMaxSectionsPerTick}) by memory tier, as a percentage
      * of their connection-aware engine baseline (captured once, before we change it). Runs on each
      * player's world thread. No-op unless {@code chunkThroughputGovernanceEnabled}. Reductions are
      * skipped for holdout players so the cohort comparison stays clean.
@@ -461,19 +461,19 @@ public class PolicyApplier {
         }
         UUID playerId = playerRef.getUuid();
         int[] baseline = chunkBaselineByPlayer.computeIfAbsent(playerId,
-                ignored -> new int[]{tracker.getMaxChunksPerSecond(), tracker.getMaxChunksPerTick()});
-        int backlog = Math.max(0, tracker.getLoadingChunksCount());
+                ignored -> new int[]{tracker.getMaxSectionsPerSecond(), tracker.getMaxSectionsPerTick()});
+        int backlog = Math.max(0, tracker.getLoadingSectionsCount());
         int targetSec = ChunkThroughputModel.targetPerSecond(config, tier, baseline[0], backlog);
         int targetTick = ChunkThroughputModel.targetPerTick(config, tier, baseline[1], backlog);
         boolean holdout = HoldoutSet.isHoldout(playerId);
 
-        int currentSec = tracker.getMaxChunksPerSecond();
+        int currentSec = tracker.getMaxSectionsPerSecond();
         if (targetSec != currentSec && !(holdout && targetSec < currentSec)) {
-            tracker.setMaxChunksPerSecond(targetSec);
+            tracker.setMaxSectionsPerSecond(targetSec);
         }
-        int currentTick = tracker.getMaxChunksPerTick();
+        int currentTick = tracker.getMaxSectionsPerTick();
         if (targetTick != currentTick && !(holdout && targetTick < currentTick)) {
-            tracker.setMaxChunksPerTick(targetTick);
+            tracker.setMaxSectionsPerTick(targetTick);
         }
     }
 

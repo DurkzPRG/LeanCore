@@ -11,7 +11,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
  */
 public final class ChunkThroughputModel {
 
-    // Never throttle the per-second rate below this. setMaxChunksPerSecond divides by the value, so it
+    // Never throttle the per-second rate below this. setMaxSectionsPerSecond divides by the value, so it
     // must stay well clear of zero, and the streaming must not stall even under critical pressure.
     static final int MIN_CHUNKS_PER_SECOND = 8;
 

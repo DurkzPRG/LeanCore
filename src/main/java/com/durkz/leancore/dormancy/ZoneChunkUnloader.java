@@ -235,7 +235,7 @@ public class ZoneChunkUnloader {
         int loading = 0;
         for (ChunkTracker tracker : trackers) {
             if (tracker != null) {
-                loading += Math.max(0, tracker.getLoadingChunksCount());
+                loading += Math.max(0, tracker.getLoadingSectionsCount());
             }
         }
         return loading;
@@ -301,7 +301,7 @@ public class ZoneChunkUnloader {
             int chunkZ
     ) {
         long index = ChunkUtil.indexChunk(chunkX, chunkZ);
-        if (ChunkUnloadingSystem.getChunkVisibility(trackers, index)
+        if (ChunkUnloadingSystem.getChunkVisibility(chunkStore, trackers, index)
                 != ChunkTracker.ChunkVisibility.NONE) {
             return false;
         }

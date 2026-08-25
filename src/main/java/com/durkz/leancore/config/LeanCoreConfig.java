@@ -162,14 +162,14 @@ public class LeanCoreConfig {
     public double zoneContentRankWeight = 0.5D;
 
     // v1.7.0 Frente C: hot/simulation radius actuator. Mirrors the view-radius governor but drives
-    // ChunkTracker.setMaxHotLoadedChunksRadius (ticking radius, separate from view radius), cutting
+    // ChunkTracker.setMaxHotLoadedRadius (ticking radius, separate from view radius), cutting
     // CPU/heap of simulated chunks without the view-radius pop-in. On by default since 1.7.0; respects
     // the same grace + holdout discipline as the view-radius governor.
     public boolean hotRadiusGovernanceEnabled = true;
     public int minHotLoadedChunksRadius = 2;
     public int maxHotLoadedChunksRadius = 8;
 
-    // Loading-pressure signal: use the in-flight chunk backlog (ChunkTracker getLoadingChunksCount)
+    // Loading-pressure signal: use the in-flight section backlog (ChunkTracker getLoadingSectionsCount)
     // to avoid fighting the engine chunk loader while a world/player is actively streaming (join,
     // teleport, sprint). It holds unload sweeps and holds view/hot-radius cuts during the burst, so
     // just-sent chunks are not dropped and re-requested. CRITICAL pressure always overrides the
@@ -178,8 +178,8 @@ public class LeanCoreConfig {
     public boolean loadingPressureSignalEnabled = true;
     public int unloadHoldWhenLoadingAbove = 16;
 
-    // Adaptive chunk throughput: scales each player's chunk send-rate (ChunkTracker maxChunksPerSecond
-    // / maxChunksPerTick) by memory tier, as a percentage of that player's connection-aware engine
+    // Adaptive chunk throughput: scales each player's section send-rate (ChunkTracker maxSectionsPerSecond
+    // / maxSectionsPerTick) by memory tier, as a percentage of that player's connection-aware engine
     // baseline (local 256 / LAN 128 / remote 36 per second). Speeds loading when heap is roomy and
     // throttles it under pressure. Off by default; WATCH always stays at 100% of the baseline.
     public boolean chunkThroughputGovernanceEnabled = false;

@@ -7,9 +7,9 @@ import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.BlockComponentChunk;
-import com.hypixel.hytale.server.core.universe.world.chunk.EntityChunk;
 import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.BlockComponentSection;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.EntitySection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 
 import java.util.Locale;
@@ -25,11 +25,11 @@ public final class RegionalEntityProbe {
     }
 
     /**
-     * @param blockEntitySaturationCap when {@code > 0}, runs in content-only mode: it scans just the
-     *        {@link BlockComponentChunk} (skipping the {@link WorldChunk} lookup, entity counting and
-     *        the world-entity read) and stops once block-entities reach the cap, since the content
-     *        score is already clamped to 1.0 there. Callers in this mode must only read
-     *        {@link RegionalEntitySample#contentScore()}; the other counts are partial.
+     * @param blockEntitySaturationCap when {@code > 0}, runs in content-only mode: it scans just
+     *        {@link BlockComponentSection}s (skipping entity counting and the world-entity read) and
+     *        stops once block-entities reach the cap, since the content score is already clamped to
+     *        1.0 there. Callers in this mode must only read {@link RegionalEntitySample#contentScore()};
+     *        the other counts are partial.
      */
     public static RegionalEntitySample read(PlayerRef ref, World world, int blockEntitySaturationCap) {
         if (ref == null || !ref.isValid() || world == null || !world.isAlive()) {
@@ -61,39 +61,46 @@ public final class RegionalEntityProbe {
         scan:
         for (int dx = 0; dx < regionChunks; dx++) {
             for (int dz = 0; dz < regionChunks; dz++) {
-                long index = ChunkUtil.indexChunk(baseChunkX + dx, baseChunkZ + dz);
-                // Full mode also counts regional entities (the WorldChunk path); content-only mode
-                // needs nothing but block-entities, so it skips that lookup entirely.
+                int chunkX = baseChunkX + dx;
+                int chunkZ = baseChunkZ + dz;
+                long index = ChunkUtil.indexChunk(chunkX, chunkZ);
+
+                // Full mode requires a loaded column (WorldChunk). Content-only mode only needs
+                // section-level block-entity data, so it does not gate on WorldChunk.
                 if (!contentOnly) {
                     WorldChunk worldChunk = chunkStore.getChunkComponent(index, WorldChunk.getComponentType());
                     if (worldChunk == null) {
                         continue;
                     }
                     chunksSampled++;
-                    EntityChunk entityChunk = worldChunk.getEntityChunk();
-                    if (entityChunk != null) {
-                        var refs = entityChunk.getEntityReferences();
-                        if (refs != null) {
-                            entities += refs.size();
+                }
+
+                boolean sawBlockSection = false;
+                for (int sectionY = ChunkUtil.MIN_SECTION; sectionY < ChunkUtil.HEIGHT_SECTIONS; sectionY++) {
+                    Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReference(chunkX, sectionY, chunkZ);
+                    if (sectionRef == null) {
+                        continue;
+                    }
+                    if (!contentOnly) {
+                        EntitySection entitySection =
+                                sectionRef.getStore().getComponent(sectionRef, EntitySection.getComponentType());
+                        if (entitySection != null) {
+                            entities += entitySection.getEntityReferences().size();
+                            entities += entitySection.getEntityHolders().size();
                         }
                     }
+                    // Block-entities (chests, benches, doors, any placed infrastructure) are the
+                    // robust "built content" signal. Holders cover non-ticking ones.
+                    BlockComponentSection blockSection =
+                            sectionRef.getStore().getComponent(sectionRef, BlockComponentSection.getComponentType());
+                    if (blockSection != null) {
+                        sawBlockSection = true;
+                        blockEntities += blockSection.getBlockReferences().size();
+                        blockEntities += blockSection.getBlockHolders().size();
+                    }
                 }
-                // Block-entities (chests, benches, doors, any placed infrastructure) are the robust
-                // "built content" signal for content-aware dormancy. Holders cover non-ticking ones.
-                BlockComponentChunk blockChunk =
-                        chunkStore.getChunkComponent(index, BlockComponentChunk.getComponentType());
-                if (blockChunk != null) {
-                    if (contentOnly) {
-                        chunksSampled++;
-                    }
-                    var blockRefs = blockChunk.getEntityReferences();
-                    if (blockRefs != null) {
-                        blockEntities += blockRefs.size();
-                    }
-                    var holders = blockChunk.getEntityHolders();
-                    if (holders != null) {
-                        blockEntities += holders.size();
-                    }
+                if (contentOnly && sawBlockSection) {
+                    chunksSampled++;
                 }
                 // The content score saturates at the cap, so further chunks cannot change it.
                 if (contentOnly && blockEntities >= blockEntitySaturationCap) {

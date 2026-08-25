@@ -24,8 +24,8 @@ public final class PlayerSpatialProbe {
         int loaded = 0;
         int loading = 0;
         if (tracker != null) {
-            loaded = Math.max(0, tracker.getLoadedChunksCount());
-            loading = Math.max(0, tracker.getLoadingChunksCount());
+            loaded = Math.max(0, tracker.getLoadedSectionsCount());
+            loading = Math.max(0, tracker.getLoadingSectionsCount());
         }
         return new SpatialSample(loaded, loading, 0);
     }
