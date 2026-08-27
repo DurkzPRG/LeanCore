@@ -12,8 +12,6 @@ On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK ch
   <img src="https://durkzprgmods.pages.dev/images/leancore-banner-800.png" alt="LeanCore server memory governor" width="672" />
 </p>
 
-Requires Hytale server **>=0.6.0**.
-
 ## Status
 
 Works and is in daily use on solo and small co-op worlds. Treat it as functional but still maturing: Hytale is in early access, so the server API can change between versions, and the heap/chunk wins depend a lot on your world (entity density, how much you build, how many chunks stay loaded). The numbers in `/leancore savings` are measured per session; I have not run a controlled large-server benchmark yet, so the comparison below is illustrative, not a published result.
@@ -40,7 +38,7 @@ Two signals drive every action: how tight memory is right now, and whether a zon
 ```
                            every tick
                                 │
-                 read heap %  +  chunk pressure
+                 read heap %  +  section pressure
                                 │
                rank against THIS server's history
                                 │
@@ -90,7 +88,7 @@ Two signals drive every action: how tight memory is right now, and whether a zon
 
 ## Runtime profiles
 
-| Players | Profile | Tick | Notes (1.7.0) |
+| Players | Profile | Tick | Notes (1.7.1) |
 |---------|---------|------|-----------------|
 | 1 (solo local) | `LITE` | 30s (60s idle) | Lite governor, adaptive view, AFK unload, lite learning, motion-aware retention |
 | 1 + `embeddedStandardProfile` | `STANDARD` | 15s | Dev dogfood of govern/learning without FULL |
@@ -100,16 +98,16 @@ Two signals drive every action: how tight memory is right now, and whether a zon
 
 Default: `localHostMode: "AUTO"`. Use `"PASSIVE"` to disable background ticks. Set `dedicatedServerMode: true` on a dedicated host.
 
-Boot log: `LeanCore 1.7.0 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
+Boot log: `LeanCore 1.7.1 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
 
-### LITE profile (1.7.0)
+### LITE profile (1.7.1)
 
 Solo embedded gets a real memory governor without switching to STANDARD. STANDARD/FULL unchanged.
 
 | Feature | Behavior |
 |---------|----------|
-| Adaptive view | 100% in COMFORT until chunk or heap pressure; gentle cuts in WATCH; aggressive only in TIGHT/CRITICAL |
-| Dual signals | JVM heap tier + chunk pressure (`loaded / view budget`) |
+| Adaptive view | 100% in COMFORT until section or heap pressure; gentle cuts in WATCH; aggressive only in TIGHT/CRITICAL |
+| Dual signals | JVM heap tier + section pressure (`loaded sections / 3D view budget`) |
 | Unload AFK | FROZEN zones when idle; probe gate; no `governEnabled` required |
 | Learning | `liteLearningEnabled=true` by default; demand shapes view cuts; no bandit in LITE |
 | Tick budget | Heavy work on heap sample (~60s), world-thread dispatch |
@@ -118,9 +116,9 @@ STANDARD/FULL: view-radius and chunk unload still require `governEnabled` / `lea
 
 ## Install
 
-1. Download **LeanCore-1.7.0.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+1. Download **LeanCore-1.7.1.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Put the JAR in your world's `mods/` folder (or `%AppData%\Hytale\UserData\Mods\` on Windows)
-3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.7.0 defaults)
+3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.7.1 defaults)
 4. Run `/leancore probe` before enabling policy unload
 5. Run `/leancore status` after about a minute
 
@@ -159,18 +157,19 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `unloadEnabled` | `false` | STANDARD/FULL policy chunk unload (after `/leancore probe`) |
 | `gcHintEnabled` | `false` | Experimental LITE idle GC nudge; metrics in `/leancore savings` |
 
-### LITE keys (1.7.0)
+### LITE keys (1.7.1)
 
 | Key | Default | Notes |
 |-----|---------|-------|
 | `liteMemoryGovernorEnabled` | `true` | Solo governor (view + unload + demote) |
 | `liteLearningEnabled` | `true` | Demand model + persistence; no bandit |
 | `liteViewRadiusEnabled` | `true` | Adaptive view on embedded solo |
-| `liteViewPressureThreshold` | `0.85` | COMFORT cap when chunk saturation high |
+| `liteViewPressureThreshold` | `0.85` | COMFORT cap when section saturation high |
 | `liteUnloadEnabled` | `true` | AFK reclaim; still needs probe |
 | `liteUnloadIdleSeconds` | `180` | Idle before unload sweeps |
+| `unloadHoldWhenLoadingAbove` | `80` | Hold unload/radius cuts while section backlog is above this |
 
-### Motion & retention keys (1.7.0)
+### Motion & retention keys (1.7.1)
 
 | Key | Default | Notes |
 |-----|---------|-------|
@@ -196,10 +195,10 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 - It does not replace manual server tuning. It helps with memory growth from idle regions; it does not fix CPU-bound tick lag.
 - Gains depend on the world. A small, mostly-static world has little to reclaim, so you may see almost no difference.
 - The learning model needs a session or two of real play before its retention and demand signals are useful. Fresh installs lean on the heuristics.
-- It targets memory and chunk pressure. It does not promise higher FPS; client frame rate depends on the renderer, not the server heap.
+- It targets memory and section/chunk pressure. It does not promise higher FPS; client frame rate depends on the renderer, not the server heap.
 - `motionViewRadiusBoostEnabled` is off by default: rewriting view radius every tick churns chunk loading on the current engine.
 - Policy chunk unload (`unloadEnabled`) stays off until you run `/leancore probe`, because it depends on server internals that can shift between Hytale versions.
-- Built against and tested on the versions noted above. Future Hytale updates may change the APIs the probe relies on.
+- Future Hytale updates may change the APIs the probe relies on.
 
 ## Build
 
@@ -207,13 +206,13 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 ./gradlew build
 ```
 
-Output: `build/libs/LeanCore-1.7.0.jar`
+Output: `build/libs/LeanCore-1.7.1.jar`
 
 **Local deploy (DurkzPRG):** copy the built JAR to:
 
 `%AppData%\Hytale\UserData\Mods\`
 
-Example (Windows): `Copy-Item build\libs\LeanCore-1.7.0.jar $env:APPDATA\Hytale\UserData\Mods\`
+Example (Windows): `Copy-Item build\libs\LeanCore-1.7.1.jar $env:APPDATA\Hytale\UserData\Mods\`
 
 ## Links
 
