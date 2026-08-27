@@ -4,10 +4,10 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.memory.MemoryTier;
 
 /**
- * Loading-pressure gate. Uses the in-flight chunk backlog ({@code ChunkTracker} loading count, read
- * on the world thread) to keep the governor from fighting the engine chunk loader while a world or
+ * Loading-pressure gate. Uses the in-flight section backlog ({@code ChunkTracker.getLoadingSectionsCount},
+ * read on the world thread) to keep the governor from fighting the engine loader while a world or
  * player is actively streaming (join, teleport, sprint into ungenerated terrain): it holds unload
- * sweeps and holds view/hot-radius cuts during the burst, so chunks just sent are not dropped and
+ * sweeps and holds view/hot-radius cuts during the burst, so sections just sent are not dropped and
  * re-requested.
  */
 public final class LoadingPressureGate {
@@ -16,7 +16,7 @@ public final class LoadingPressureGate {
     }
 
     /**
-     * @param totalLoadingChunks summed in-flight chunk columns across a world's online players
+     * @param totalLoadingChunks summed in-flight sections across a world's online players
      * @return true when unload should be held this pass because the world is still streaming
      */
     public static boolean holdsUnload(LeanCoreConfig config, int totalLoadingChunks) {
@@ -28,10 +28,10 @@ public final class LoadingPressureGate {
 
     /**
      * Streaming grace for a per-player radius cut. Holds a reduction (target below current) while the
-     * player is actively streaming, so the client is not told to drop chunks it is loading. Real
+     * player is actively streaming, so the client is not told to drop sections it is loading. Real
      * pressure always wins: at {@link MemoryTier#CRITICAL} the cut is never held.
      *
-     * @param loadingBacklog this player's in-flight chunk columns
+     * @param loadingBacklog this player's in-flight section count
      */
     public static boolean holdsRadiusReduction(
             LeanCoreConfig config, MemoryTier tier, int loadingBacklog, int target, int current) {

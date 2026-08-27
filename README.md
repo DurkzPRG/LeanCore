@@ -12,7 +12,7 @@ On a local/solo world it uses the **LITE** profile: adaptive view-radius, AFK ch
   <img src="https://durkzprgmods.pages.dev/images/leancore-banner-800.png" alt="LeanCore server memory governor" width="672" />
 </p>
 
-Requires Hytale server **>=0.5.6**.
+Requires Hytale server **>=0.6.0**.
 
 ## Status
 

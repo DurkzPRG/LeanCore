@@ -65,4 +65,25 @@ class LeanCoreConfigLoadTest {
         assertTrue(Files.list(dataDir).anyMatch(
                 path -> path.getFileName().toString().startsWith("LeanCore.json.corrupt.")));
     }
+
+    @Test
+    void remapsColumnEraUnloadHoldDefaultToSectionBacklog(@TempDir Path dataDir) throws Exception {
+        Files.writeString(dataDir.resolve("LeanCore.json"),
+                "{\"unloadHoldWhenLoadingAbove\": 16}", StandardCharsets.UTF_8);
+
+        LeanCoreConfig config = LeanCoreConfig.load(dataDir);
+
+        assertEquals(80, config.unloadHoldWhenLoadingAbove);
+        assertTrue(Files.readString(dataDir.resolve("LeanCore.json")).contains("\"unloadHoldWhenLoadingAbove\": 80"));
+    }
+
+    @Test
+    void preservesCustomUnloadHoldAboveOldDefault(@TempDir Path dataDir) throws Exception {
+        Files.writeString(dataDir.resolve("LeanCore.json"),
+                "{\"unloadHoldWhenLoadingAbove\": 40}", StandardCharsets.UTF_8);
+
+        LeanCoreConfig config = LeanCoreConfig.load(dataDir);
+
+        assertEquals(40, config.unloadHoldWhenLoadingAbove);
+    }
 }

@@ -174,9 +174,9 @@ public class LeanCoreConfig {
     // teleport, sprint). It holds unload sweeps and holds view/hot-radius cuts during the burst, so
     // just-sent chunks are not dropped and re-requested. CRITICAL pressure always overrides the
     // radius grace. On by default; it only ever delays unload or a radius reduction. The threshold is
-    // the in-flight chunk count above which a world/player counts as actively streaming.
+    // the in-flight section count above which a world/player counts as actively streaming (0.6 units).
     public boolean loadingPressureSignalEnabled = true;
-    public int unloadHoldWhenLoadingAbove = 16;
+    public int unloadHoldWhenLoadingAbove = 80;
 
     // Adaptive chunk throughput: scales each player's section send-rate (ChunkTracker maxSectionsPerSecond
     // / maxSectionsPerTick) by memory tier, as a percentage of that player's connection-aware engine
@@ -232,7 +232,11 @@ public class LeanCoreConfig {
             LeanCoreConfig loaded = GSON.fromJson(reader, LeanCoreConfig.class);
             if (loaded != null) {
                 loaded.configFile = file;
+                boolean remapped = loaded.remapSectionEraDefaults();
                 loaded.applyRuntimeDefaults();
+                if (remapped) {
+                    loaded.save();
+                }
                 return loaded;
             }
         } catch (Exception ignored) {
@@ -241,6 +245,18 @@ public class LeanCoreConfig {
 
         config.applyRuntimeDefaults();
         return config;
+    }
+
+    /**
+     * Column-era default (16) is too low once the signal is section backlog on 0.6.
+     * Remap exactly that shipped default to the section-era floor (80).
+     */
+    boolean remapSectionEraDefaults() {
+        if (unloadHoldWhenLoadingAbove == 16) {
+            unloadHoldWhenLoadingAbove = 80;
+            return true;
+        }
+        return false;
     }
 
     private static void quarantineCorruptConfig(File file) {
@@ -311,7 +327,7 @@ public class LeanCoreConfig {
             unloadMaxChunksPerSweep = MAX_UNLOAD_CHUNKS_CAP;
         }
         if (unloadHoldWhenLoadingAbove < 0) {
-            unloadHoldWhenLoadingAbove = 16;
+            unloadHoldWhenLoadingAbove = 80;
         }
         if (chunkThroughputComfortPct < 100) {
             chunkThroughputComfortPct = 135;
