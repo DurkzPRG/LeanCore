@@ -23,7 +23,6 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -88,34 +87,14 @@ public class PolicyApplier {
             return 0;
         }
 
-        Map<UUID, List<PlayerApply>> byWorld = new HashMap<>();
-        for (PlayerRef playerRef : online) {
-            if (!playerRef.isValid()) {
-                continue;
-            }
-            UUID worldUuid = playerRef.getWorldUuid();
-            if (worldUuid == null) {
-                continue;
-            }
-            World world = Universe.get().getWorld(worldUuid);
-            if (world == null || !world.isAlive()) {
-                continue;
-            }
-            RetentionDemand demand = demands.getOrDefault(
-                    playerRef.getUuid(),
-                    RetentionDemand.coldStart(PlayerBehavior.UNKNOWN)
-            );
-            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>())
-                    .add(new PlayerApply(playerRef, demand));
-        }
-
+        PlayerBatchScratch scratch = groupPlayers(online, false);
         int scheduled = 0;
-        for (Map.Entry<UUID, List<PlayerApply>> entry : byWorld.entrySet()) {
-            World world = Universe.get().getWorld(entry.getKey());
+        for (MutablePlayerBatch grouped : scratch.groupedWorlds) {
+            World world = Universe.get().getWorld(grouped.worldUuid);
             if (world == null || !world.isAlive()) {
                 continue;
             }
-            List<PlayerApply> batch = List.copyOf(entry.getValue());
+            List<PlayerRef> batch = List.copyOf(grouped.players);
             if (!RuntimeGuard.active()) {
                 continue;
             }
@@ -126,8 +105,11 @@ public class PolicyApplier {
                 if (!RuntimeGuard.active()) {
                     return;
                 }
-                for (PlayerApply item : batch) {
-                    applyOne(item.playerRef(), policy, item.demand(), profile);
+                for (PlayerRef playerRef : batch) {
+                    RetentionDemand demand = demands.getOrDefault(
+                            playerRef.getUuid(),
+                            RetentionDemand.coldStart(PlayerBehavior.UNKNOWN));
+                    applyOne(playerRef, policy, demand, profile);
                 }
             });
             if (done) {
@@ -257,31 +239,16 @@ public class PolicyApplier {
         if (!config.motionModelEnabled || !config.motionViewRadiusBoostEnabled) {
             return;
         }
-        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
-        for (PlayerRef playerRef : online) {
-            if (playerRef == null || !playerRef.isValid()) {
-                continue;
-            }
-            UUID worldUuid = playerRef.getWorldUuid();
-            if (worldUuid == null) {
-                continue;
-            }
-            World world = Universe.get().getWorld(worldUuid);
-            if (world == null || !world.isAlive()) {
-                continue;
-            }
-            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(playerRef);
-        }
-
+        PlayerBatchScratch scratch = groupPlayers(online, false);
         // Live boost runs every motion tick; apply even 1-block changes (the periodic policy pass
         // keeps config.minViewRadiusDelta).
         int minDelta = 1;
-        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
-            World world = Universe.get().getWorld(entry.getKey());
+        for (MutablePlayerBatch grouped : scratch.groupedWorlds) {
+            World world = Universe.get().getWorld(grouped.worldUuid);
             if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
                 continue;
             }
-            List<PlayerRef> batch = List.copyOf(entry.getValue());
+            List<PlayerRef> batch = List.copyOf(grouped.players);
             WorldDispatch.run(world, () -> {
                 if (!RuntimeGuard.active()) {
                     return;
@@ -338,18 +305,7 @@ public class PolicyApplier {
         int target = HotRadiusGovernance.targetHotRadius(config, policy.viewScale());
         boolean criticalCut = policy.tier() == MemoryTier.CRITICAL;
         logHotRadius(target, policy);
-        PlayerBatchScratch scratch = playerBatchScratch.get();
-        scratch.clear();
-        for (PlayerRef playerRef : online) {
-            if (playerRef == null || !playerRef.isValid()) {
-                continue;
-            }
-            UUID worldUuid = playerRef.getWorldUuid();
-            if (worldUuid == null) {
-                continue;
-            }
-            scratch.playersFor(worldUuid).add(playerRef);
-        }
+        PlayerBatchScratch scratch = groupPlayers(online, false);
         for (MutablePlayerBatch grouped : scratch.groupedWorlds) {
             World world = Universe.get().getWorld(grouped.worldUuid);
             if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
@@ -427,36 +383,20 @@ public class PolicyApplier {
                 || !config.chunkThroughputGovernanceEnabled) {
             return;
         }
-        Set<UUID> onlineIds = new HashSet<>();
-        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
-        for (PlayerRef playerRef : online) {
-            if (playerRef == null || !playerRef.isValid()) {
-                continue;
-            }
-            onlineIds.add(playerRef.getUuid());
-            UUID worldUuid = playerRef.getWorldUuid();
-            if (worldUuid == null) {
-                continue;
-            }
-            World world = Universe.get().getWorld(worldUuid);
-            if (world == null || !world.isAlive()) {
-                continue;
-            }
-            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(playerRef);
-        }
+        PlayerBatchScratch scratch = groupPlayers(online, true);
         // Drop baselines for players who left, so the map cannot grow without bound.
-        chunkBaselineByPlayer.keySet().retainAll(onlineIds);
+        chunkBaselineByPlayer.keySet().retainAll(scratch.onlineIds);
         DiagnosticLog.infoOnChange("chunk-throughput", String.format(Locale.ROOT,
                 "chunk throughput tier=%s pct=%d%% (comfort=%d tight=%d critical=%d)",
                 tier, ChunkThroughputModel.percentForTier(config, tier),
                 config.chunkThroughputComfortPct, config.chunkThroughputTightPct,
                 config.chunkThroughputCriticalPct));
-        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
-            World world = Universe.get().getWorld(entry.getKey());
+        for (MutablePlayerBatch grouped : scratch.groupedWorlds) {
+            World world = Universe.get().getWorld(grouped.worldUuid);
             if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
                 continue;
             }
-            List<PlayerRef> batch = List.copyOf(entry.getValue());
+            List<PlayerRef> batch = List.copyOf(grouped.players);
             WorldDispatch.run(world, () -> {
                 if (!RuntimeGuard.active()) {
                     return;
@@ -507,18 +447,35 @@ public class PolicyApplier {
         return Math.max(min, Math.min(max, value));
     }
 
-    private record PlayerApply(PlayerRef playerRef, RetentionDemand demand) {
+    private PlayerBatchScratch groupPlayers(Collection<PlayerRef> online, boolean collectOnlineIds) {
+        PlayerBatchScratch scratch = playerBatchScratch.get();
+        scratch.clear();
+        for (PlayerRef playerRef : online) {
+            if (playerRef == null || !playerRef.isValid()) {
+                continue;
+            }
+            if (collectOnlineIds) {
+                scratch.onlineIds.add(playerRef.getUuid());
+            }
+            UUID worldUuid = playerRef.getWorldUuid();
+            if (worldUuid != null) {
+                scratch.playersFor(worldUuid).add(playerRef);
+            }
+        }
+        return scratch;
     }
 
     /** The governor scheduler is single-threaded, so per-world grouping can keep its capacity. */
     private static final class PlayerBatchScratch {
 
         private final ArrayList<MutablePlayerBatch> groupedWorlds = new ArrayList<>();
+        private final HashSet<UUID> onlineIds = new HashSet<>();
 
         private void clear() {
             for (MutablePlayerBatch grouped : groupedWorlds) {
                 grouped.players.clear();
             }
+            onlineIds.clear();
         }
 
         private ArrayList<PlayerRef> playersFor(UUID worldUuid) {
