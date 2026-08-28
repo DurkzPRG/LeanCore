@@ -37,6 +37,12 @@ public class MemoryGovernor {
     private boolean rolledBack;
     private double[] contextAtChange;
     private volatile long viewRadiusGraceUntilMs;
+    private String lastLoggedLitePolicyKey;
+    private String lastLoggedLitePressurePolicyKey;
+    private MemoryTier lastLoggedLiteTier;
+    private double lastLoggedLiteViewScale = Double.NaN;
+    private boolean lastLoggedLitePressurePolicySelected;
+    private boolean lastLoggedLiteChunkCap;
 
     private volatile GovernorStatus lastStatus = GovernorStatus.idle();
 
@@ -258,16 +264,33 @@ public class MemoryGovernor {
         if (toApply == null) {
             return;
         }
+        boolean pressurePolicySelected = toApply.key().equals(pressurePolicy.key());
+        boolean chunkPressureCap = sample.tier() == MemoryTier.COMFORT && toApply.viewScale() < 1.0D;
+        if (pressurePolicySelected == lastLoggedLitePressurePolicySelected
+                && chunkPressureCap == lastLoggedLiteChunkCap
+                && sample.tier() == lastLoggedLiteTier
+                && Double.compare(toApply.viewScale(), lastLoggedLiteViewScale) == 0
+                && toApply.key().equals(lastLoggedLitePolicyKey)
+                && pressurePolicy.key().equals(lastLoggedLitePressurePolicyKey)) {
+            return;
+        }
+        lastLoggedLitePolicyKey = toApply.key();
+        lastLoggedLitePressurePolicyKey = pressurePolicy.key();
+        lastLoggedLiteTier = sample.tier();
+        lastLoggedLiteViewScale = toApply.viewScale();
+        lastLoggedLitePressurePolicySelected = pressurePolicySelected;
+        lastLoggedLiteChunkCap = chunkPressureCap;
+
         String why;
-        if (toApply.key().equals(pressurePolicy.key())) {
+        if (pressurePolicySelected) {
             why = "tier " + sample.tier() + " pressure policy";
         } else {
             why = "held (min interval " + config.policyChangeMinIntervalSec + "s) want " + pressurePolicy.key();
         }
-        if (sample.tier() == MemoryTier.COMFORT && toApply.viewScale() < 1.0D) {
+        if (chunkPressureCap) {
             why += " (chunk-pressure cap)";
         }
-        DiagnosticLog.infoOnChange("lite-policy", String.format(Locale.ROOT,
+        DiagnosticLog.info(String.format(Locale.ROOT,
                 "lite policy %s view=%.0f%% why=%s", toApply.key(), toApply.viewScale() * 100.0D, why));
     }
 

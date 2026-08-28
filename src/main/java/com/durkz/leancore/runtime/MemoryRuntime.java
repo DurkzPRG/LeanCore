@@ -74,6 +74,8 @@ public class MemoryRuntime {
     private ChunkSaturationSampler chunkSaturationSampler;
     private ChunkPrefetcher chunkPrefetcher;
     private final ThreadLocal<WorldBatchScratch> worldBatchScratch = ThreadLocal.withInitial(WorldBatchScratch::new);
+    private final ThreadLocal<DormancyRefreshScratch> dormancyRefreshScratch =
+            ThreadLocal.withInitial(DormancyRefreshScratch::new);
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -674,13 +676,15 @@ public class MemoryRuntime {
      * a partial pass and retry next tick.
      */
     private boolean refreshDormancyPerWorld(List<WorldBatch> batches, long nowMs) {
-        List<ZoneKey> hot = new ArrayList<>();
+        DormancyRefreshScratch scratch = dormancyRefreshScratch.get();
+        scratch.clear();
+        List<ZoneKey> hot = scratch.hot;
         boolean complete = true;
         int engineRemoved = 0;
         boolean unloadTruth = config.chunkUnloadEventTracking && config.perChunkUnloadTruthEnabled;
         boolean contentScan = config.zoneContentModelEnabled;
         if (unloadTruth) {
-            Set<UUID> aliveWorlds = new HashSet<>();
+            Set<UUID> aliveWorlds = scratch.aliveWorlds;
             for (WorldBatch batch : batches) {
                 aliveWorlds.add(batch.worldUuid());
             }
@@ -783,6 +787,18 @@ public class MemoryRuntime {
 
         private MutableWorldBatch(UUID worldUuid) {
             this.worldUuid = worldUuid;
+        }
+    }
+
+    /** Only aggregation state is reused. Per-world task results stay isolated after a timeout. */
+    private static final class DormancyRefreshScratch {
+
+        private final ArrayList<ZoneKey> hot = new ArrayList<>();
+        private final HashSet<UUID> aliveWorlds = new HashSet<>();
+
+        private void clear() {
+            hot.clear();
+            aliveWorlds.clear();
         }
     }
 

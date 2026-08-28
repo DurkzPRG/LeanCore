@@ -82,17 +82,21 @@ public class BehaviorClassifier {
     }
 
     public Map<UUID, PlayerBehavior> snapshotBehaviors(long nowMs) {
+        return snapshotBehaviors(features.snapshot(), nowMs);
+    }
+
+    private Map<UUID, PlayerBehavior> snapshotBehaviors(Map<UUID, PlayerFeatureState> snapshot, long nowMs) {
         ActivityClassifierModel model = learningStore.activityClassifier();
-        Map<UUID, PlayerFeatureState> snap = features.snapshot();
-        Map<UUID, PlayerBehavior> out = new HashMap<>(snap.size());
-        for (Map.Entry<UUID, PlayerFeatureState> e : snap.entrySet()) {
+        Map<UUID, PlayerBehavior> out = new HashMap<>(snapshot.size());
+        for (Map.Entry<UUID, PlayerFeatureState> e : snapshot.entrySet()) {
             out.put(e.getKey(), BehaviorPosterior.topLabel(e.getValue(), model, nowMs));
         }
         return out;
     }
 
     public Map<UUID, RetentionDemand> snapshotDemands(long nowMs) {
-        return learningStore.demandModel().estimate(features.snapshot(), snapshotBehaviors(nowMs), nowMs);
+        Map<UUID, PlayerFeatureState> snapshot = features.snapshot();
+        return learningStore.demandModel().estimate(snapshot, snapshotBehaviors(snapshot, nowMs), nowMs);
     }
 
     public void syncToStore(LearningStore store) {

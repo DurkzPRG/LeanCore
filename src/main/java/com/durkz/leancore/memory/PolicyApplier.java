@@ -28,6 +28,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,10 +41,14 @@ public class PolicyApplier {
 
     private String lastAppliedPolicyKey;
     private long lastApplyMs;
+    private int lastLoggedHotRadius = Integer.MIN_VALUE;
+    private double lastLoggedHotRadiusScale = Double.NaN;
+    private String lastLoggedHotRadiusPolicy;
 
     // Connection-aware engine chunk-rate baseline per player (perSecond, perTick), captured before we
     // first touch it. Targets are a percentage of this, so the player's connection class is honored.
     private final Map<UUID, int[]> chunkBaselineByPlayer = new ConcurrentHashMap<>();
+    private final ThreadLocal<PlayerBatchScratch> playerBatchScratch = ThreadLocal.withInitial(PlayerBatchScratch::new);
 
     public PolicyApplier(LeanCoreConfig config, FalseCutTracker falseCutTracker, ViewRadiusCache viewRadiusCache) {
         this.config = config;
@@ -332,11 +337,9 @@ public class PolicyApplier {
         }
         int target = HotRadiusGovernance.targetHotRadius(config, policy.viewScale());
         boolean criticalCut = policy.tier() == MemoryTier.CRITICAL;
-        DiagnosticLog.infoOnChange("hot-radius", String.format(Locale.ROOT,
-                "hot radius target=%d (max=%d min=%d viewScale=%.2f policy=%s)",
-                target, config.maxHotLoadedChunksRadius, config.minHotLoadedChunksRadius,
-                policy.viewScale(), policy.key()));
-        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
+        logHotRadius(target, policy);
+        PlayerBatchScratch scratch = playerBatchScratch.get();
+        scratch.clear();
         for (PlayerRef playerRef : online) {
             if (playerRef == null || !playerRef.isValid()) {
                 continue;
@@ -345,18 +348,16 @@ public class PolicyApplier {
             if (worldUuid == null) {
                 continue;
             }
-            World world = Universe.get().getWorld(worldUuid);
-            if (world == null || !world.isAlive()) {
-                continue;
-            }
-            byWorld.computeIfAbsent(worldUuid, ignored -> new ArrayList<>()).add(playerRef);
+            scratch.playersFor(worldUuid).add(playerRef);
         }
-        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
-            World world = Universe.get().getWorld(entry.getKey());
+        for (MutablePlayerBatch grouped : scratch.groupedWorlds) {
+            World world = Universe.get().getWorld(grouped.worldUuid);
             if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
                 continue;
             }
-            List<PlayerRef> batch = List.copyOf(entry.getValue());
+            // A timed-out task may execute after this scratch buffer is reused, so it must retain
+            // an immutable player list for its own world pass.
+            List<PlayerRef> batch = List.copyOf(grouped.players);
             WorldDispatch.run(world, () -> {
                 if (!RuntimeGuard.active()) {
                     return;
@@ -366,6 +367,22 @@ public class PolicyApplier {
                 }
             });
         }
+    }
+
+    private void logHotRadius(int target, GovernorPolicy policy) {
+        double scale = policy.viewScale();
+        String policyKey = policy.key();
+        if (target == lastLoggedHotRadius
+                && Double.compare(scale, lastLoggedHotRadiusScale) == 0
+                && Objects.equals(policyKey, lastLoggedHotRadiusPolicy)) {
+            return;
+        }
+        lastLoggedHotRadius = target;
+        lastLoggedHotRadiusScale = scale;
+        lastLoggedHotRadiusPolicy = policyKey;
+        DiagnosticLog.info(String.format(Locale.ROOT,
+                "hot radius target=%d (max=%d min=%d viewScale=%.2f policy=%s)",
+                target, config.maxHotLoadedChunksRadius, config.minHotLoadedChunksRadius, scale, policyKey));
     }
 
     private void applyHotRadiusOne(PlayerRef playerRef, int target, boolean criticalCut) {
@@ -491,5 +508,38 @@ public class PolicyApplier {
     }
 
     private record PlayerApply(PlayerRef playerRef, RetentionDemand demand) {
+    }
+
+    /** The governor scheduler is single-threaded, so per-world grouping can keep its capacity. */
+    private static final class PlayerBatchScratch {
+
+        private final ArrayList<MutablePlayerBatch> groupedWorlds = new ArrayList<>();
+
+        private void clear() {
+            for (MutablePlayerBatch grouped : groupedWorlds) {
+                grouped.players.clear();
+            }
+        }
+
+        private ArrayList<PlayerRef> playersFor(UUID worldUuid) {
+            for (MutablePlayerBatch grouped : groupedWorlds) {
+                if (grouped.worldUuid.equals(worldUuid)) {
+                    return grouped.players;
+                }
+            }
+            MutablePlayerBatch grouped = new MutablePlayerBatch(worldUuid);
+            groupedWorlds.add(grouped);
+            return grouped.players;
+        }
+    }
+
+    private static final class MutablePlayerBatch {
+
+        private final UUID worldUuid;
+        private final ArrayList<PlayerRef> players = new ArrayList<>();
+
+        private MutablePlayerBatch(UUID worldUuid) {
+            this.worldUuid = worldUuid;
+        }
     }
 }

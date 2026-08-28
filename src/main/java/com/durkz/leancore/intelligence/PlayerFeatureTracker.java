@@ -28,6 +28,11 @@ public class PlayerFeatureTracker implements ViewRadiusCache, PredictedPositionS
         });
     }
 
+    /** Returns a tracked state without creating one or copying the complete feature map. */
+    public PlayerFeatureState state(UUID playerId) {
+        return playerId == null ? null : states.get(playerId);
+    }
+
     public void forget(UUID playerId) {
         PlayerFeatureState state = states.remove(playerId);
         if (state != null) {
