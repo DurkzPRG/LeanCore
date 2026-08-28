@@ -88,7 +88,7 @@ Two signals drive every action: how tight memory is right now, and whether a zon
 
 ## Runtime profiles
 
-| Players | Profile | Tick | Notes (1.7.1) |
+| Players | Profile | Tick | Notes (1.7.2) |
 |---------|---------|------|-----------------|
 | 1 (solo local) | `LITE` | 30s (60s idle) | Lite governor, adaptive view, AFK unload, lite learning, motion-aware retention |
 | 1 + `embeddedStandardProfile` | `STANDARD` | 15s | Dev dogfood of govern/learning without FULL |
@@ -98,9 +98,9 @@ Two signals drive every action: how tight memory is right now, and whether a zon
 
 Default: `localHostMode: "AUTO"`. Use `"PASSIVE"` to disable background ticks. Set `dedicatedServerMode: true` on a dedicated host.
 
-Boot log: `LeanCore 1.7.1 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
+Boot log: `LeanCore 1.7.2 setup (localHostMode=AUTO).` and `Runtime started profile=LITE` on solo.
 
-### LITE profile (1.7.1)
+### LITE profile (1.7.2)
 
 Solo embedded gets a real memory governor without switching to STANDARD. STANDARD/FULL unchanged.
 
@@ -116,9 +116,9 @@ STANDARD/FULL: view-radius and chunk unload still require `governEnabled` / `lea
 
 ## Install
 
-1. Download **LeanCore-1.7.1.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
+1. Download **LeanCore-1.7.2.jar** from [CurseForge](https://www.curseforge.com/hytale/mods/leancore/files)
 2. Put the JAR in your world's `mods/` folder (or `%AppData%\Hytale\UserData\Mods\` on Windows)
-3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.7.1 defaults)
+3. Config: `mods/durkz_LeanCore/LeanCore.json` (created on first boot with 1.7.2 defaults)
 4. Run `/leancore probe` before enabling policy unload
 5. Run `/leancore status` after about a minute
 
@@ -156,8 +156,9 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `dedicatedBootstrapEnabled` | `true` | One-time preset on first dedicated boot |
 | `unloadEnabled` | `false` | STANDARD/FULL policy chunk unload (after `/leancore probe`) |
 | `gcHintEnabled` | `false` | Experimental LITE idle GC nudge; metrics in `/leancore savings` |
+| `checkForUpdates` | `true` | Notify ops/admins once per session when a newer JAR is on the mod page |
 
-### LITE keys (1.7.1)
+### LITE keys (1.7.2)
 
 | Key | Default | Notes |
 |-----|---------|-------|
@@ -169,7 +170,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `liteUnloadIdleSeconds` | `180` | Idle before unload sweeps |
 | `unloadHoldWhenLoadingAbove` | `80` | Hold unload/radius cuts while section backlog is above this |
 
-### Motion & retention keys (1.7.1)
+### Motion & retention keys (1.7.2)
 
 | Key | Default | Notes |
 |-----|---------|-------|
@@ -206,13 +207,13 @@ Full reference: [documentation](https://durkzprgmods.pages.dev/documentation/lea
 ./gradlew build
 ```
 
-Output: `build/libs/LeanCore-1.7.1.jar`
+Output: `build/libs/LeanCore-1.7.2.jar`
 
 **Local deploy (DurkzPRG):** copy the built JAR to:
 
 `%AppData%\Hytale\UserData\Mods\`
 
-Example (Windows): `Copy-Item build\libs\LeanCore-1.7.1.jar $env:APPDATA\Hytale\UserData\Mods\`
+Example (Windows): `Copy-Item build\libs\LeanCore-1.7.2.jar $env:APPDATA\Hytale\UserData\Mods\`
 
 ## Links
 

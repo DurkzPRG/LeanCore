@@ -1,7 +1,7 @@
 {
     "Group": "durkz",
     "Name": "LeanCore",
-    "Version": "1.7.1",
+    "Version": "1.7.2",
     "Description": "Server-side memory governor for Hytale. Unloads idle map regions, trims view radius under heap pressure, and learns which zones get revisited so it keeps the ones you actually use.",
     "Authors": [
         {
