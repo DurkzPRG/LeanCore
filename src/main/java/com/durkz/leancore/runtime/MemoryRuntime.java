@@ -36,7 +36,6 @@ import com.hypixel.hytale.server.core.universe.world.World;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -74,6 +73,7 @@ public class MemoryRuntime {
     private final GcHintScheduler gcHintScheduler;
     private ChunkSaturationSampler chunkSaturationSampler;
     private ChunkPrefetcher chunkPrefetcher;
+    private final ThreadLocal<WorldBatchScratch> worldBatchScratch = ThreadLocal.withInitial(WorldBatchScratch::new);
 
     private volatile MemorySnapshot lastSample;
     private volatile SessionMode lastMode = SessionMode.SOLO;
@@ -617,25 +617,27 @@ public class MemoryRuntime {
     }
 
     /** Online players grouped by their alive world, so per-player work runs on the right thread. */
-    private static List<WorldBatch> resolveAliveWorldBatches(Collection<PlayerRef> online) {
+    private List<WorldBatch> resolveAliveWorldBatches(Collection<PlayerRef> online) {
+        WorldBatchScratch scratch = worldBatchScratch.get();
+        scratch.clear();
         if (online == null || online.isEmpty()) {
             return List.of();
         }
-        Map<UUID, List<PlayerRef>> byWorld = new HashMap<>();
         for (PlayerRef ref : online) {
             if (ref == null || !ref.isValid() || ref.getWorldUuid() == null) {
                 continue;
             }
-            byWorld.computeIfAbsent(ref.getWorldUuid(), ignored -> new ArrayList<>()).add(ref);
+            scratch.playersFor(ref.getWorldUuid()).add(ref);
         }
-        List<WorldBatch> batches = new ArrayList<>();
-        for (Map.Entry<UUID, List<PlayerRef>> entry : byWorld.entrySet()) {
-            World world = Universe.get().getWorld(entry.getKey());
+        for (MutableWorldBatch grouped : scratch.groupedWorlds) {
+            World world = Universe.get().getWorld(grouped.worldUuid);
             if (world != null && world.isAlive()) {
-                batches.add(new WorldBatch(entry.getKey(), world, List.copyOf(entry.getValue())));
+                // A timed-out world task may still run after this scratch buffer is reused. Give the
+                // task an immutable player list so it cannot observe a later runtime pass.
+                scratch.batches.add(new WorldBatch(grouped.worldUuid, world, List.copyOf(grouped.players)));
             }
         }
-        return batches;
+        return scratch.batches;
     }
 
     /** Samples player motion on each world's own thread (transform reads need world affinity). */
@@ -747,6 +749,41 @@ public class MemoryRuntime {
     }
 
     private record WorldBatch(UUID worldUuid, World world, List<PlayerRef> players) {
+    }
+
+    /** Runtime scheduler is single-threaded, so grouping buffers can be reused between passes. */
+    private static final class WorldBatchScratch {
+
+        private final ArrayList<MutableWorldBatch> groupedWorlds = new ArrayList<>();
+        private final ArrayList<WorldBatch> batches = new ArrayList<>();
+
+        private void clear() {
+            for (MutableWorldBatch grouped : groupedWorlds) {
+                grouped.players.clear();
+            }
+            batches.clear();
+        }
+
+        private ArrayList<PlayerRef> playersFor(UUID worldUuid) {
+            for (MutableWorldBatch grouped : groupedWorlds) {
+                if (grouped.worldUuid.equals(worldUuid)) {
+                    return grouped.players;
+                }
+            }
+            MutableWorldBatch grouped = new MutableWorldBatch(worldUuid);
+            groupedWorlds.add(grouped);
+            return grouped.players;
+        }
+    }
+
+    private static final class MutableWorldBatch {
+
+        private final UUID worldUuid;
+        private final ArrayList<PlayerRef> players = new ArrayList<>();
+
+        private MutableWorldBatch(UUID worldUuid) {
+            this.worldUuid = worldUuid;
+        }
     }
 
     private void tickLite(java.util.Collection<PlayerRef> online, long nowMs) {

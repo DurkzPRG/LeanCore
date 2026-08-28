@@ -2,6 +2,7 @@ package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.diagnostics.DiagnosticLog;
+import com.durkz.leancore.diagnostics.ZoneRankingJfrEvent;
 import com.durkz.leancore.intelligence.FalseCutTracker;
 import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.math.vector.Transform;
@@ -31,6 +32,7 @@ public class ZoneDormancyMap {
     private volatile FalseCutTracker falseCutTracker;
     private final Map<ZoneKey, Long> recentlyUnloadedAtMs = new ConcurrentHashMap<>();
     private final AtomicInteger revisitAfterUnloadCount = new AtomicInteger();
+    private final ThreadLocal<ZoneRankScratch> rankScratch = ThreadLocal.withInitial(ZoneRankScratch::new);
 
     public ZoneDormancyMap(LeanCoreConfig config) {
         this.config = config;
@@ -344,20 +346,28 @@ public class ZoneDormancyMap {
         }
 
         long now = System.currentTimeMillis();
-        List<Map.Entry<ZoneKey, Double>> ranked = new ArrayList<>();
-        for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
-            if (pinned.contains(entry.getKey())) {
-                continue;
+        ZoneRankingJfrEvent event = ZoneRankingJfrEvent.begin("unload-candidates");
+        ZoneRankScratch scratch = rankScratch.get();
+        scratch.reset(zones.size());
+        try {
+            for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
+                ZoneKey key = entry.getKey();
+                if (pinned.contains(key) || !qualifiesForUnload(entry.getValue(), tier, minDormantUnloadTier)
+                        || isProtectedByRevisit(key, tier, now)) {
+                    continue;
+                }
+                double distanceSq = nearestUnprotectedDistanceSq(key, playerXZ);
+                if (Double.isNaN(distanceSq)) {
+                    continue;
+                }
+                scratch.add(key, evictionPriority(key, distanceFromSquared(distanceSq), now));
             }
-            ZoneState state = entry.getValue();
-            if (qualifiesForUnload(state, tier, minDormantUnloadTier)
-                    && !isProtectedByView(entry.getKey(), playerXZ)
-                    && !isProtectedByRevisit(entry.getKey(), tier, now)) {
-                ranked.add(Map.entry(entry.getKey(), evictionPriority(entry.getKey(), playerXZ, now)));
-            }
+            scratch.sortDescendingStable();
+            return scratch.copyKeys();
+        } finally {
+            ZoneRankingJfrEvent.commit(event, zones.size(), scratch.size());
+            scratch.clear();
         }
-        ranked.sort(Map.Entry.comparingByValue(Comparator.reverseOrder()));
-        return ranked.stream().map(Map.Entry::getKey).collect(Collectors.toList());
     }
 
     public int demoteFarthestDormant(int maxZones) {
@@ -371,20 +381,30 @@ public class ZoneDormancyMap {
         }
 
         long now = System.currentTimeMillis();
-        List<Map.Entry<ZoneKey, Double>> dormant = zones.entrySet().stream()
-                .filter(e -> e.getValue() == ZoneState.DORMANT && !pinned.contains(e.getKey()))
-                .filter(e -> !isProtectedByView(e.getKey(), playerXZ))
-                .map(e -> Map.entry(e.getKey(), evictionPriority(e.getKey(), playerXZ, now)))
-                .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
-                .limit(maxZones)
-                .collect(Collectors.toList());
-
-        int demoted = 0;
-        for (Map.Entry<ZoneKey, Double> entry : dormant) {
-            zones.put(entry.getKey(), ZoneState.FROZEN);
-            demoted++;
+        ZoneRankingJfrEvent event = ZoneRankingJfrEvent.begin("demote-dormant");
+        ZoneRankScratch scratch = rankScratch.get();
+        scratch.reset(zones.size());
+        try {
+            for (Map.Entry<ZoneKey, ZoneState> entry : zones.entrySet()) {
+                ZoneKey key = entry.getKey();
+                if (entry.getValue() != ZoneState.DORMANT || pinned.contains(key)) {
+                    continue;
+                }
+                double distanceSq = nearestUnprotectedDistanceSq(key, playerXZ);
+                if (!Double.isNaN(distanceSq)) {
+                    scratch.add(key, evictionPriority(key, distanceFromSquared(distanceSq), now));
+                }
+            }
+            scratch.sortDescendingStable();
+            int demoted = Math.min(maxZones, scratch.size());
+            for (int i = 0; i < demoted; i++) {
+                zones.put(scratch.keyAt(i), ZoneState.FROZEN);
+            }
+            return demoted;
+        } finally {
+            ZoneRankingJfrEvent.commit(event, zones.size(), scratch.size());
+            scratch.clear();
         }
-        return demoted;
     }
 
     /**
@@ -415,7 +435,10 @@ public class ZoneDormancyMap {
      * When the reuse model is off, this collapses to plain distance so behaviour is unchanged.
      */
     double evictionPriority(ZoneKey key, List<PlayerPos> playerXZ, long nowMs) {
-        double distance = minDistanceToPlayers(key, playerXZ);
+        return evictionPriority(key, minDistanceToPlayers(key, playerXZ), nowMs);
+    }
+
+    private double evictionPriority(ZoneKey key, double distance, long nowMs) {
         ZoneReuseModel reuse = this.reuseModel;
         if (!config.zoneReuseModelEnabled || reuse == null) {
             return distance;
@@ -558,14 +581,14 @@ public class ZoneDormancyMap {
      * the center). Other worlds are ignored, so a world with nobody online ranks as MAX_VALUE.
      */
     static double minDistanceToPlayers(ZoneKey key, List<PlayerPos> playerXZ) {
-        double min = Double.MAX_VALUE;
+        double minSq = Double.POSITIVE_INFINITY;
         for (PlayerPos p : playerXZ) {
             if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
                 continue;
             }
-            min = Math.min(min, edgeDistance(key, p.x(), p.z()));
+            minSq = Math.min(minSq, edgeDistanceSquared(key, p.x(), p.z()));
         }
-        return min;
+        return distanceFromSquared(minSq);
     }
 
     /**
@@ -573,20 +596,11 @@ public class ZoneDormancyMap {
      * player's view distance plus one region of slack. Trades reclaim near players for zero thrash.
      */
     static boolean isProtectedByView(ZoneKey key, List<PlayerPos> playerXZ) {
-        double margin = ZoneKey.regionChunks() * 16.0D;
-        for (PlayerPos p : playerXZ) {
-            if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
-                continue;
-            }
-            if (edgeDistance(key, p.x(), p.z()) <= p.viewBlocks() + margin) {
-                return true;
-            }
-        }
-        return false;
+        return Double.isNaN(nearestUnprotectedDistanceSq(key, playerXZ));
     }
 
-    /** Distance from (px,pz) to the nearest point of the region's block-space AABB. */
-    private static double edgeDistance(ZoneKey key, double px, double pz) {
+    /** Squared distance from (px,pz) to the nearest point of the region's block-space AABB. */
+    static double edgeDistanceSquared(ZoneKey key, double px, double pz) {
         double regionBlocks = ZoneKey.regionChunks() * 16.0D;
         double minX = key.regionX() * regionBlocks;
         double maxX = minX + regionBlocks;
@@ -594,7 +608,31 @@ public class ZoneDormancyMap {
         double maxZ = minZ + regionBlocks;
         double clampedX = Math.max(minX, Math.min(px, maxX));
         double clampedZ = Math.max(minZ, Math.min(pz, maxZ));
-        return Math.hypot(px - clampedX, pz - clampedZ);
+        double dx = px - clampedX;
+        double dz = pz - clampedZ;
+        return dx * dx + dz * dz;
+    }
+
+    /** Returns NaN when the zone is protected, otherwise its nearest same-world distance squared. */
+    static double nearestUnprotectedDistanceSq(ZoneKey key, List<PlayerPos> playerXZ) {
+        double minSq = Double.POSITIVE_INFINITY;
+        double margin = ZoneKey.regionChunks() * 16.0D;
+        for (PlayerPos p : playerXZ) {
+            if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
+                continue;
+            }
+            double distanceSq = edgeDistanceSquared(key, p.x(), p.z());
+            double protectedRadius = p.viewBlocks() + margin;
+            if (distanceSq <= protectedRadius * protectedRadius) {
+                return Double.NaN;
+            }
+            minSq = Math.min(minSq, distanceSq);
+        }
+        return minSq;
+    }
+
+    private static double distanceFromSquared(double distanceSq) {
+        return Double.isInfinite(distanceSq) ? Double.MAX_VALUE : Math.sqrt(distanceSq);
     }
 
     record PlayerPos(java.util.UUID world, double x, double z, double viewBlocks) {
@@ -605,5 +643,99 @@ public class ZoneDormancyMap {
             return true;
         }
         return state == ZoneState.DORMANT && heapTier.ordinal() >= minDormantUnloadTier.ordinal();
+    }
+
+    /** Reusable stable sort buffer. Each runtime thread gets its own instance. */
+    private static final class ZoneRankScratch {
+        private ZoneKey[] keys = new ZoneKey[0];
+        private double[] scores = new double[0];
+        private ZoneKey[] keyWork = new ZoneKey[0];
+        private double[] scoreWork = new double[0];
+        private int size;
+
+        void reset(int expectedSize) {
+            ensureCapacity(expectedSize);
+            size = 0;
+        }
+
+        void add(ZoneKey key, double score) {
+            keys[size] = key;
+            scores[size] = score;
+            size++;
+        }
+
+        int size() {
+            return size;
+        }
+
+        ZoneKey keyAt(int index) {
+            return keys[index];
+        }
+
+        List<ZoneKey> copyKeys() {
+            List<ZoneKey> result = new ArrayList<>(size);
+            for (int i = 0; i < size; i++) {
+                result.add(keys[i]);
+            }
+            return result;
+        }
+
+        void sortDescendingStable() {
+            for (int width = 1; width < size; width <<= 1) {
+                for (int left = 0; left < size; left += width << 1) {
+                    int middle = Math.min(left + width, size);
+                    int right = Math.min(left + (width << 1), size);
+                    merge(left, middle, right);
+                }
+                ZoneKey[] keySwap = keys;
+                keys = keyWork;
+                keyWork = keySwap;
+                double[] scoreSwap = scores;
+                scores = scoreWork;
+                scoreWork = scoreSwap;
+            }
+        }
+
+        void clear() {
+            for (int i = 0; i < size; i++) {
+                keys[i] = null;
+                keyWork[i] = null;
+            }
+            size = 0;
+        }
+
+        private void merge(int left, int middle, int right) {
+            int a = left;
+            int b = middle;
+            int target = left;
+            while (a < middle && b < right) {
+                if (scores[a] >= scores[b]) {
+                    keyWork[target] = keys[a];
+                    scoreWork[target++] = scores[a++];
+                } else {
+                    keyWork[target] = keys[b];
+                    scoreWork[target++] = scores[b++];
+                }
+            }
+            while (a < middle) {
+                keyWork[target] = keys[a];
+                scoreWork[target++] = scores[a++];
+            }
+            while (b < right) {
+                keyWork[target] = keys[b];
+                scoreWork[target++] = scores[b++];
+            }
+        }
+
+        private void ensureCapacity(int expectedSize) {
+            if (keys.length >= expectedSize) {
+                return;
+            }
+            int capacity = Math.max(expectedSize, keys.length * 2 + 16);
+            keys = new ZoneKey[capacity];
+            scores = new double[capacity];
+            keyWork = new ZoneKey[capacity];
+            scoreWork = new double[capacity];
+        }
     }
 }

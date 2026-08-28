@@ -7,6 +7,8 @@ import java.util.Locale;
  */
 public final class BehaviorPosterior {
 
+    private static final PlayerBehavior[] BEHAVIORS = PlayerBehavior.values();
+
     private BehaviorPosterior() {
     }
 
@@ -41,32 +43,22 @@ public final class BehaviorPosterior {
             return PlayerBehavior.AFK;
         }
 
-        double[] raw = new double[PlayerBehavior.values().length];
-        raw[PlayerBehavior.MINER.ordinal()] = state.emaMine60();
-        raw[PlayerBehavior.LUMBERJACK.ordinal()] = state.emaWood60();
-        raw[PlayerBehavior.FARMER.ordinal()] = state.emaFarm60();
-        raw[PlayerBehavior.BUILDER.ordinal()] = state.emaBuild60() * 1.2D;
-        raw[PlayerBehavior.CRAFTER.ordinal()] = state.emaCraft60();
-        raw[PlayerBehavior.FIGHTER.ordinal()] = state.emaCombat60();
-        raw[PlayerBehavior.EXPLORER.ordinal()] = state.emaMovement60() * 0.04D + state.emaZones60() * 2.0D;
-        raw[PlayerBehavior.SOCIAL.ordinal()] = Math.max(0.0D, 2.0D - state.activityIndex() * 0.02D);
-
-        int best = -1;
+        PlayerBehavior best = PlayerBehavior.UNKNOWN;
         double bestScore = 0.0D;
-        for (int i = 0; i < raw.length; i++) {
-            PlayerBehavior label = PlayerBehavior.values()[i];
+        for (PlayerBehavior label : BEHAVIORS) {
             if (label == PlayerBehavior.UNKNOWN || label == PlayerBehavior.AFK) {
                 continue;
             }
-            if (raw[i] > bestScore) {
-                bestScore = raw[i];
-                best = i;
+            double score = activityScore(label, state);
+            if (score > bestScore) {
+                bestScore = score;
+                best = label;
             }
         }
-        if (best < 0 || bestScore < 0.5D) {
+        if (bestScore < 0.5D) {
             return PlayerBehavior.UNKNOWN;
         }
-        return PlayerBehavior.values()[best];
+        return best;
     }
 
     public static String formatTopThree(PlayerFeatureState state, ActivityClassifierModel model, long nowMs) {
@@ -79,7 +71,7 @@ public final class BehaviorPosterior {
         double firstScore = -1.0D;
         double secondScore = -1.0D;
         for (int i = 0; i < scores.length; i++) {
-            PlayerBehavior label = PlayerBehavior.values()[i];
+            PlayerBehavior label = BEHAVIORS[i];
             if (label == PlayerBehavior.UNKNOWN || label == PlayerBehavior.AFK) {
                 continue;
             }
@@ -96,19 +88,19 @@ public final class BehaviorPosterior {
         if (first < 0) {
             return "posterior=UNKNOWN";
         }
-        PlayerBehavior top = PlayerBehavior.values()[first];
+        PlayerBehavior top = BEHAVIORS[first];
         if (second < 0) {
             return String.format(Locale.ROOT, "posterior=%s %.0f%%", top, firstScore * 100.0D);
         }
         return String.format(Locale.ROOT, "posterior=%s %.0f%% %s %.0f%%",
                 top,
                 firstScore * 100.0D,
-                PlayerBehavior.values()[second],
+                BEHAVIORS[second],
                 secondScore * 100.0D);
     }
 
     private static double[] emaScores(PlayerFeatureState state) {
-        double[] raw = new double[PlayerBehavior.values().length];
+        double[] raw = new double[BEHAVIORS.length];
         double norm = Math.max(1.0D, state.emaMine60() + state.emaWood60() + state.emaFarm60()
                 + state.emaBuild60() + state.emaCraft60() + state.emaCombat60() + 1.0D);
         raw[PlayerBehavior.MINER.ordinal()] = state.emaMine60() / norm;
@@ -119,5 +111,19 @@ public final class BehaviorPosterior {
         raw[PlayerBehavior.FIGHTER.ordinal()] = state.emaCombat60() / norm;
         raw[PlayerBehavior.EXPLORER.ordinal()] = (state.emaMovement60() * 0.02D + state.emaZones60()) / norm;
         return raw;
+    }
+
+    private static double activityScore(PlayerBehavior label, PlayerFeatureState state) {
+        return switch (label) {
+            case MINER -> state.emaMine60();
+            case LUMBERJACK -> state.emaWood60();
+            case FARMER -> state.emaFarm60();
+            case BUILDER -> state.emaBuild60() * 1.2D;
+            case CRAFTER -> state.emaCraft60();
+            case FIGHTER -> state.emaCombat60();
+            case EXPLORER -> state.emaMovement60() * 0.04D + state.emaZones60() * 2.0D;
+            case SOCIAL -> Math.max(0.0D, 2.0D - state.activityIndex() * 0.02D);
+            case AFK, UNKNOWN -> 0.0D;
+        };
     }
 }

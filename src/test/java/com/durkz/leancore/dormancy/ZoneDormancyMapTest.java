@@ -125,6 +125,34 @@ class ZoneDormancyMapTest {
     }
 
     @Test
+    void squaredGeometryMatchesThePreviousPointToAabbDistance() {
+        ZoneKey zone = new ZoneKey(WORLD, -3, 2);
+        double[][] positions = {
+                {-256.0D, 128.0D},
+                {-180.25D, 197.5D},
+                {-140.0D, 300.0D},
+                {0.0D, 0.0D}
+        };
+
+        for (double[] position : positions) {
+            assertEquals(oldEdgeDistance(zone, position[0], position[1]),
+                    Math.sqrt(ZoneDormancyMap.edgeDistanceSquared(zone, position[0], position[1])), 1e-9);
+        }
+    }
+
+    @Test
+    void combinedSpatialPassRejectsProtectedZonesWithoutASecondDistanceWalk() {
+        ZoneKey zone = new ZoneKey(WORLD, 2, 0);
+        List<ZoneDormancyMap.PlayerPos> protectedPlayers =
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, 0.0D, 0.0D, 100.0D));
+        List<ZoneDormancyMap.PlayerPos> distantPlayers =
+                List.of(new ZoneDormancyMap.PlayerPos(WORLD, -500.0D, 0.0D, 10.0D));
+
+        assertTrue(Double.isNaN(ZoneDormancyMap.nearestUnprotectedDistanceSq(zone, protectedPlayers)));
+        assertFalse(Double.isNaN(ZoneDormancyMap.nearestUnprotectedDistanceSq(zone, distantPlayers)));
+    }
+
+    @Test
     void protectedRadiusExcludesZonesInsideViewDistance() {
         ZoneKey near = new ZoneKey(WORLD, 2, 0);
         ZoneKey far = new ZoneKey(WORLD, 8, 0);
@@ -277,5 +305,16 @@ class ZoneDormancyMapTest {
         assertFalse(ZoneDormancyMap.revisitProtects(true, MemoryTier.TIGHT, 0.84D, threshold));
         // Disabled -> not protected.
         assertFalse(ZoneDormancyMap.revisitProtects(false, MemoryTier.TIGHT, 0.99D, threshold));
+    }
+
+    private static double oldEdgeDistance(ZoneKey key, double px, double pz) {
+        double regionBlocks = ZoneKey.regionChunks() * 16.0D;
+        double minX = key.regionX() * regionBlocks;
+        double maxX = minX + regionBlocks;
+        double minZ = key.regionZ() * regionBlocks;
+        double maxZ = minZ + regionBlocks;
+        double clampedX = Math.max(minX, Math.min(px, maxX));
+        double clampedZ = Math.max(minZ, Math.min(pz, maxZ));
+        return Math.hypot(px - clampedX, pz - clampedZ);
     }
 }

@@ -27,17 +27,9 @@ public final class WorldDispatch {
             task.run();
             return true;
         }
-        CompletableFuture<Void> done = new CompletableFuture<>();
+        DispatchTask done = new DispatchTask(task);
         try {
-            world.execute(() -> {
-                try {
-                    if (RuntimeGuard.active()) {
-                        task.run();
-                    }
-                } finally {
-                    done.complete(null);
-                }
-            });
+            world.execute(done);
         } catch (RuntimeException ignored) {
             return false;
         }
@@ -63,5 +55,26 @@ public final class WorldDispatch {
             return true;
         }
         return GovernorWorldContext.matchesWorld(world);
+    }
+
+    /** One queued object replaces the per-dispatch CompletableFuture and wrapper lambda. */
+    private static final class DispatchTask extends CompletableFuture<Void> implements Runnable {
+
+        private final Runnable task;
+
+        private DispatchTask(Runnable task) {
+            this.task = task;
+        }
+
+        @Override
+        public void run() {
+            try {
+                if (RuntimeGuard.active()) {
+                    task.run();
+                }
+            } finally {
+                complete(null);
+            }
+        }
     }
 }

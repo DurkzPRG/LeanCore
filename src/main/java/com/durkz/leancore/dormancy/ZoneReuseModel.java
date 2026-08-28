@@ -31,9 +31,19 @@ public final class ZoneReuseModel {
         if (key == null) {
             return;
         }
-        stats.compute(key, (k, prev) -> prev == null
-                ? ZoneReuseStat.firstVisit(nowMs)
-                : prev.revisit(nowMs));
+        for (;;) {
+            ZoneReuseStat previous = stats.get(key);
+            ZoneReuseStat updated = previous == null
+                    ? ZoneReuseStat.firstVisit(nowMs)
+                    : previous.revisit(nowMs);
+            if (previous == null) {
+                if (stats.putIfAbsent(key, updated) == null) {
+                    return;
+                }
+            } else if (stats.replace(key, previous, updated)) {
+                return;
+            }
+        }
     }
 
     /** Revisit likelihood in [0,1]. Neutral (0.5) until enough visits are observed. */
@@ -69,10 +79,18 @@ public final class ZoneReuseModel {
             return;
         }
         final double observed = FeatureNormalizer.clamp01(contentScore);
-        stats.compute(key, (k, prev) -> {
-            ZoneReuseStat base = prev == null ? ZoneReuseStat.contentOnly(nowMs) : prev;
-            return base.withContent(observed, nowMs);
-        });
+        for (;;) {
+            ZoneReuseStat previous = stats.get(key);
+            ZoneReuseStat base = previous == null ? ZoneReuseStat.contentOnly(nowMs) : previous;
+            ZoneReuseStat updated = base.withContent(observed, nowMs);
+            if (previous == null) {
+                if (stats.putIfAbsent(key, updated) == null) {
+                    return;
+                }
+            } else if (stats.replace(key, previous, updated)) {
+                return;
+            }
+        }
     }
 
     /** Persisted content score in [0,1] for the zone, or 0 (none/unknown) when untracked. */
