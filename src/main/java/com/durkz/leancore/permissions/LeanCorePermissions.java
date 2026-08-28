@@ -3,6 +3,7 @@ package com.durkz.leancore.permissions;
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.hypixel.hytale.server.core.permissions.PermissionsModule;
 import com.hypixel.hytale.server.core.permissions.provider.HytalePermissionsProvider;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -45,6 +46,17 @@ public final class LeanCorePermissions {
             return true;
         }
         return inAnyGroup(uuid, config.hudAdminGroups);
+    }
+
+    /** Update notices are operational information, so only operators and explicit admins receive them. */
+    public static boolean canReceiveUpdateNotice(PlayerRef playerRef) {
+        if (playerRef == null || playerRef.getUuid() == null) {
+            return false;
+        }
+        if (playerRef.hasPermission(HUD_ADMIN)) {
+            return true;
+        }
+        return hasPermission(playerRef.getUuid(), HUD_ADMIN);
     }
 
     private static boolean hasPermission(UUID uuid, String permission) {

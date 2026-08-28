@@ -22,6 +22,8 @@ public class LeanCoreConfig {
     private transient File configFile;
 
     public boolean enabled = true;
+    /** Check the LeanCore mod page on startup and notify only operators or LeanCore admins about updates. */
+    public boolean checkForUpdates = true;
     @Deprecated
     public boolean localHostPassiveMode = false;
     public String localHostMode = "AUTO";

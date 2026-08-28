@@ -13,6 +13,7 @@ import com.durkz.leancore.memory.ServerContextTracker;
 import com.durkz.leancore.permissions.LeanCorePermissions;
 import com.durkz.leancore.runtime.MemoryRuntime;
 import com.durkz.leancore.runtime.RuntimeActivationPolicy;
+import com.durkz.leancore.update.ModUpdateChecker;
 import com.hypixel.hytale.server.core.event.events.ShutdownEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
@@ -74,6 +75,10 @@ public class LeanCorePlugin extends JavaPlugin {
         }
         LeanCorePermissions.register();
         getCommandRegistry().registerCommand(new LeanCoreCommand());
+        getEventRegistry().registerGlobal(PlayerConnectEvent.class,
+                event -> ModUpdateChecker.getInstance().notifyPlayer(event.getPlayerRef()));
+        getEventRegistry().registerGlobal(PlayerDisconnectEvent.class,
+                event -> ModUpdateChecker.getInstance().forgetPlayer(event.getPlayerRef().getUuid()));
 
         if (RuntimeActivationPolicy.isFullyPassive(config)) {
             getLogger().atInfo().log(
@@ -125,6 +130,7 @@ public class LeanCorePlugin extends JavaPlugin {
     @Override
     protected void start() {
         super.start();
+        ModUpdateChecker.getInstance().start(this, config);
         if (runtime != null) {
             runtime.start();
         }
@@ -132,6 +138,7 @@ public class LeanCorePlugin extends JavaPlugin {
 
     @Override
     protected void shutdown() {
+        ModUpdateChecker.getInstance().shutdown();
         if (runtime != null) {
             runtime.shutdown();
             runtime = null;
