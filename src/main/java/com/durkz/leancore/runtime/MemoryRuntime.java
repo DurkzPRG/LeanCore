@@ -631,7 +631,8 @@ public class MemoryRuntime {
             }
             scratch.playersFor(ref.getWorldUuid()).add(ref);
         }
-        for (MutableWorldBatch grouped : scratch.groupedWorlds) {
+        for (int i = 0, size = scratch.groupedWorlds.size(); i < size; i++) {
+            MutableWorldBatch grouped = scratch.groupedWorlds.get(i);
             World world = Universe.get().getWorld(grouped.worldUuid);
             if (world != null && world.isAlive()) {
                 // A timed-out world task may still run after this scratch buffer is reused. Give the
@@ -645,7 +646,8 @@ public class MemoryRuntime {
     /** Samples player motion on each world's own thread (transform reads need world affinity). */
     private void samplePositionsPerWorld(List<WorldBatch> batches, long nowMs, boolean fullProbe) {
         long deadlineNs = System.nanoTime() + FAN_OUT_BUDGET_NANOS;
-        for (WorldBatch batch : batches) {
+        for (int i = 0, size = batches.size(); i < size; i++) {
+            WorldBatch batch = batches.get(i);
             if (System.nanoTime() > deadlineNs) {
                 DiagnosticLog.infoOnChange("fanout-budget",
                         "fan-out budget exceeded; motion sample ran on a subset of worlds this tick");
@@ -762,14 +764,15 @@ public class MemoryRuntime {
         private final ArrayList<WorldBatch> batches = new ArrayList<>();
 
         private void clear() {
-            for (MutableWorldBatch grouped : groupedWorlds) {
-                grouped.players.clear();
+            for (int i = 0, size = groupedWorlds.size(); i < size; i++) {
+                groupedWorlds.get(i).players.clear();
             }
             batches.clear();
         }
 
         private ArrayList<PlayerRef> playersFor(UUID worldUuid) {
-            for (MutableWorldBatch grouped : groupedWorlds) {
+            for (int i = 0, size = groupedWorlds.size(); i < size; i++) {
+                MutableWorldBatch grouped = groupedWorlds.get(i);
                 if (grouped.worldUuid.equals(worldUuid)) {
                     return grouped.players;
                 }
@@ -923,7 +926,7 @@ public class MemoryRuntime {
             if (ref == null || !ref.isValid()) {
                 continue;
             }
-            var features = classifier.features().snapshot().get(ref.getUuid());
+            var features = classifier.features().state(ref.getUuid());
             if (features != null) {
                 return features.idleSec(System.currentTimeMillis());
             }
