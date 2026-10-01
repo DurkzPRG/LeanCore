@@ -6,7 +6,6 @@ import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.runtime.RuntimeProfile;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
 import com.durkz.leancore.dormancy.ZoneDormancyMap;
-import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.intelligence.LearningStore;
 import com.durkz.leancore.intelligence.OutcomeTracker;
 import com.durkz.leancore.intelligence.PolicyBandit;
@@ -27,7 +26,6 @@ public class MemoryGovernor {
     private final PolicyApplier applier;
     private final ZoneChunkUnloader zoneChunkUnloader;
     private final LearningStore learningStore;
-    private final PolicyBandit bandit;
     private final OutcomeTracker outcomeTracker;
 
     private GovernorPolicy activePolicy;
@@ -58,7 +56,6 @@ public class MemoryGovernor {
         this.applier = applier;
         this.zoneChunkUnloader = zoneChunkUnloader;
         this.learningStore = learningStore;
-        this.bandit = learningStore.policyBandit();
         this.outcomeTracker = learningStore.outcomeTracker();
     }
 
@@ -344,19 +341,8 @@ public class MemoryGovernor {
         }
 
         DiagnosticLog.infoOnChange("policy-decision",
-                "policy decision: bandit selecting (tier <= " + pressurePolicy.tier() + ")");
-        double meanDemand = meanDemand(demands);
-        return bandit.select(
-                preset,
-                pressurePolicy.tier(),
-                sample,
-                meanDemand,
-                elapsedSec,
-                learningStore.serverContext().q50(),
-                learningStore.regionalPressure(),
-                activePolicy,
-                learningStore.policyBlacklist()::isBlacklisted
-        );
+                "policy decision: deterministic pressure policy " + pressurePolicy.key());
+        return pressurePolicy;
     }
 
     private void commitPolicy(
@@ -383,27 +369,13 @@ public class MemoryGovernor {
                 learningStore.serverContext().q50(),
                 learningStore.regionalPressure()
         );
-        if (hasTreatmentCohort(demands)) {
-            outcomeTracker.onPolicyApplied(
-                    toApply.key(),
-                    contextAtChange,
-                    sample.heapUsedRatio(),
-                    sample.onlinePlayers(),
-                    nowMs
-            );
-        }
-    }
-
-    private static boolean hasTreatmentCohort(Map<UUID, RetentionDemand> demands) {
-        if (demands == null || demands.isEmpty()) {
-            return true;
-        }
-        for (UUID playerId : demands.keySet()) {
-            if (!HoldoutSet.isHoldout(playerId)) {
-                return true;
-            }
-        }
-        return false;
+        outcomeTracker.onPolicyApplied(
+                toApply.key(),
+                contextAtChange,
+                sample.heapUsedRatio(),
+                sample.onlinePlayers(),
+                nowMs
+        );
     }
 
     private static double meanDemand(Map<UUID, RetentionDemand> demands) {

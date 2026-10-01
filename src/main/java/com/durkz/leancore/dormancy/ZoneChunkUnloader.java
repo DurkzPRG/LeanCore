@@ -38,6 +38,9 @@ public class ZoneChunkUnloader {
     private volatile int engineUnloadYields;
     private long lastSweepMs;
     private long lastProbeGateLogMs;
+    private int lastRevisitCount;
+    private int revisitPenalty;
+    private long lastRevisitMs;
 
     /** Same threshold as engine {@code ChunkUnloadingSystem.DESPERATE_UNLOAD_RAM_USAGE_THRESHOLD}. */
     public static final double ENGINE_DESPERATE_HEAP_RATIO = 0.85D;
@@ -179,7 +182,7 @@ public class ZoneChunkUnloader {
             byWorld.computeIfAbsent(zone.worldUuid(), ignored -> new ArrayList<>()).add(zone);
         }
 
-        int maxChunks = Math.max(1, config.liteUnloadMaxChunksPerSweep);
+        int maxChunks = adaptiveLiteBatch(dormancyMap, nowMs);
         int unloaded = 0;
 
         for (Map.Entry<UUID, List<ZoneKey>> entry : byWorld.entrySet()) {
@@ -215,6 +218,24 @@ public class ZoneChunkUnloader {
                     unloaded, candidates.size(), tier, playerIdleSec));
         }
         return unloaded;
+    }
+
+    private int adaptiveLiteBatch(ZoneDormancyMap dormancyMap, long nowMs) {
+        int revisits = dormancyMap.revisitAfterUnloadCount();
+        if (revisits > lastRevisitCount) {
+            revisitPenalty = Math.min(3, revisitPenalty + 1);
+            lastRevisitMs = nowMs;
+        } else if (revisitPenalty > 0 && nowMs - lastRevisitMs >= 10 * 60_000L) {
+            revisitPenalty--;
+            lastRevisitMs = nowMs;
+        }
+        lastRevisitCount = revisits;
+        int configured = Math.max(1, config.liteUnloadMaxChunksPerSweep);
+        return Math.max(1, configured >> revisitPenalty);
+    }
+
+    public int revisitPenalty() {
+        return revisitPenalty;
     }
 
     /** Feeds confirmed per-zone unloads to the dormancy map so revisit-after-unload can be scored. */

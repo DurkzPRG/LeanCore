@@ -12,12 +12,40 @@ import com.hypixel.hytale.server.core.universe.world.chunk.section.BlockComponen
 import com.hypixel.hytale.server.core.universe.world.chunk.section.EntitySection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 
+import java.lang.reflect.Field;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 public final class RegionalEntityProbe {
 
+    // Hytale 0.7 removed BlockComponentSection.getBlockReferences(). The private field exists on
+    // both 0.6 and 0.7, so read its size by reflection. Null when the lookup failed: ticking
+    // block-entities are then skipped and only holders count.
+    private static final Field BLOCK_REFERENCES_FIELD = findBlockReferencesField();
+
     private RegionalEntityProbe() {
+    }
+
+    private static Field findBlockReferencesField() {
+        try {
+            Field field = BlockComponentSection.class.getDeclaredField("blockReferences");
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static int blockReferenceCount(BlockComponentSection section) {
+        if (BLOCK_REFERENCES_FIELD == null) {
+            return 0;
+        }
+        try {
+            return BLOCK_REFERENCES_FIELD.get(section) instanceof Map<?, ?> refs ? refs.size() : 0;
+        } catch (IllegalAccessException e) {
+            return 0;
+        }
     }
 
     public static RegionalEntitySample read(PlayerRef ref, World world) {
@@ -76,7 +104,10 @@ public final class RegionalEntityProbe {
                 }
 
                 boolean sawBlockSection = false;
-                for (int sectionY = ChunkUtil.MIN_SECTION; sectionY < ChunkUtil.HEIGHT_SECTIONS; sectionY++) {
+                // ChunkUtil.HEIGHT_SECTIONS is deprecated on 0.7. Its replacement,
+                // getLoadedSectionReferences, scans every loaded section in the world per call, too
+                // costly here. The engine still force-loads Y sections 0..9, so they cover the terrain.
+                for (int sectionY = 0; sectionY < ChunkPressureModel.HEIGHT_SECTIONS; sectionY++) {
                     Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReference(chunkX, sectionY, chunkZ);
                     if (sectionRef == null) {
                         continue;
@@ -95,7 +126,7 @@ public final class RegionalEntityProbe {
                             sectionRef.getStore().getComponent(sectionRef, BlockComponentSection.getComponentType());
                     if (blockSection != null) {
                         sawBlockSection = true;
-                        blockEntities += blockSection.getBlockReferences().size();
+                        blockEntities += blockReferenceCount(blockSection);
                         blockEntities += blockSection.getBlockHolders().size();
                     }
                 }

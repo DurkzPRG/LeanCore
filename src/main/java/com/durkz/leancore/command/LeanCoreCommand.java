@@ -7,7 +7,6 @@ import com.durkz.leancore.dormancy.ZoneHeatmapEntry;
 import com.durkz.leancore.dormancy.ZoneKey;
 import com.durkz.leancore.dormancy.ZoneState;
 import com.durkz.leancore.intelligence.BehaviorPosterior;
-import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.permissions.LeanCorePermissions;
 import com.durkz.leancore.intelligence.PlayerFeatureState;
 import com.durkz.leancore.intelligence.RetentionDemand;
@@ -93,6 +92,13 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
         DiagnosticLog.info("[cmd] /leancore " + sub + " by " + (who != null ? who.getUuid() : "?"));
     }
 
+    private static String formatEta(double seconds) {
+        if (!Double.isFinite(seconds)) {
+            return "n/a";
+        }
+        return Math.max(0L, Math.round(seconds)) + "s";
+    }
+
     private static final class StatusCmd extends CommandBase {
         StatusCmd() {
             super("status", "Runtime status");
@@ -127,6 +133,13 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                         + plugin.config().soloAdaptiveTickEnabled, "#888888");
             }
             say(ctx, "tier " + sample.tier() + " | spread " + (int) sample.playerSpreadBlocks() + " blocks", "#AAAAAA");
+            say(ctx, String.format(Locale.ROOT,
+                    "pressure=%s old=%.0f%% postGc=%.0f%% alloc=%.1f MB/s gcDuty=%.1f%% slope=%+.3f%%/s etaTight=%s",
+                    sample.pressureReason(), sample.oldGenUsedRatio() * 100.0D,
+                    sample.postGcHeapUsedRatio() * 100.0D,
+                    sample.allocationBytesPerSecond() / (1024.0D * 1024.0D),
+                    sample.gcPauseRatio() * 100.0D, sample.heapSlopePerSecond() * 100.0D,
+                    formatEta(sample.secondsToTight())), "#AAAAAA");
             var gov = rt.governorStatus();
             if (gov.enabled() && gov.policy() != null) {
                 say(ctx, "preset " + gov.preset() + " | policy " + gov.policy().key()
@@ -135,6 +148,8 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             say(ctx, rt.learningStore().statusLine(), "#888888");
             say(ctx, rt.learningStore().windowLine(), "#888888");
             say(ctx, rt.learningStore().serverLine(), "#888888");
+            say(ctx, rt.actionLedger().statusLine(), "#888888");
+            say(ctx, "unload revisitPenalty=" + rt.zoneChunkUnloader().revisitPenalty(), "#888888");
             LeanCoreConfig config = plugin.config();
             long nowMs = System.currentTimeMillis();
             say(ctx, String.format(Locale.ROOT,
@@ -290,15 +305,14 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 if (config != null) {
                     say(ctx, UnloadProbeGate.statusLine(config, System.currentTimeMillis()), "#888888");
                 }
-                say(ctx, "LITE learning: demand model + persistence; no bandit or holdout in solo", "#888888");
+                say(ctx, "LITE learning: behavior persistence plus attributed revisit outcomes", "#888888");
             } else {
                 say(ctx, rt.learningStore().policyBandit().topArmLine(), "#AAAAAA");
-                say(ctx, rt.learningStore().holdoutStatusLine(), "#AAAAAA");
                 if (config != null) {
                     say(ctx, UnloadProbeGate.statusLine(config, System.currentTimeMillis()), "#888888");
                 }
                 say(ctx, rt.regionalPressureCache().statusLine(), "#888888");
-                say(ctx, "holdout=10% skips view-radius cuts; bandit learns from treatment cohort only", "#888888");
+                say(ctx, "policy=deterministic by pressure tier; bandit arms shown for reference only", "#888888");
             }
         }
     }
@@ -335,15 +349,12 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 return;
             }
             say(ctx, String.format(Locale.ROOT,
-                    "features move60=%.1f break60=%.1f chunks60=%.1f idle=%ds observed=%ds holdout=%s",
+                    "features move60=%.1f break60=%.1f chunks60=%.1f idle=%ds observed=%ds",
                     features.emaMovement60(),
                     features.emaBreaks60(),
                     features.emaChunks60(),
                     features.idleSec(nowMs),
-                    features.observedSec(),
-                    rt.activeProfile() == RuntimeProfile.LITE
-                            ? "n/a"
-                            : Boolean.toString(HoldoutSet.isHoldout(playerRef.getUuid()))), "#AAAAAA");
+                    features.observedSec()), "#AAAAAA");
             say(ctx, BehaviorPosterior.formatTopThree(features, rt.learningStore().activityClassifier(), nowMs), "#888888");
             say(ctx, rt.learningStore().activityClassifier().statusLine(features, nowMs), "#888888");
             say(ctx, String.format(Locale.ROOT,

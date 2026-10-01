@@ -2,7 +2,6 @@ package com.durkz.leancore.dormancy;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.diagnostics.DiagnosticLog;
-import com.durkz.leancore.diagnostics.ZoneRankingJfrEvent;
 import com.durkz.leancore.intelligence.FalseCutTracker;
 import com.durkz.leancore.memory.MemoryTier;
 import com.hypixel.hytale.math.vector.Transform;
@@ -346,7 +345,6 @@ public class ZoneDormancyMap {
         }
 
         long now = System.currentTimeMillis();
-        ZoneRankingJfrEvent event = ZoneRankingJfrEvent.begin("unload-candidates");
         ZoneRankScratch scratch = rankScratch.get();
         scratch.reset(zones.size());
         try {
@@ -365,7 +363,6 @@ public class ZoneDormancyMap {
             scratch.sortDescendingStable();
             return scratch.copyKeys();
         } finally {
-            ZoneRankingJfrEvent.commit(event, zones.size(), scratch.size());
             scratch.clear();
         }
     }
@@ -381,7 +378,6 @@ public class ZoneDormancyMap {
         }
 
         long now = System.currentTimeMillis();
-        ZoneRankingJfrEvent event = ZoneRankingJfrEvent.begin("demote-dormant");
         ZoneRankScratch scratch = rankScratch.get();
         scratch.reset(zones.size());
         try {
@@ -402,7 +398,6 @@ public class ZoneDormancyMap {
             }
             return demoted;
         } finally {
-            ZoneRankingJfrEvent.commit(event, zones.size(), scratch.size());
             scratch.clear();
         }
     }
@@ -564,14 +559,16 @@ public class ZoneDormancyMap {
             if (chunks > 0) {
                 viewBlocks = chunks * 16.0D;
             }
-            out.add(new PlayerPos(worldUuid, xz[0], xz[1], viewBlocks));
-            // A predicted point protects the cone ahead too.
+            double predictedX = xz[0];
+            double predictedZ = xz[1];
             if (usePredicted) {
                 double[] predicted = source.predictedXZ(playerId, horizonMs);
                 if (predicted != null) {
-                    out.add(new PlayerPos(worldUuid, predicted[0], predicted[1], viewBlocks));
+                    predictedX = predicted[0];
+                    predictedZ = predicted[1];
                 }
             }
+            out.add(new PlayerPos(worldUuid, xz[0], xz[1], predictedX, predictedZ, viewBlocks));
         }
         return out;
     }
@@ -586,7 +583,7 @@ public class ZoneDormancyMap {
             if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
                 continue;
             }
-            minSq = Math.min(minSq, edgeDistanceSquared(key, p.x(), p.z()));
+            minSq = Math.min(minSq, corridorDistanceSquared(key, p));
         }
         return distanceFromSquared(minSq);
     }
@@ -621,7 +618,7 @@ public class ZoneDormancyMap {
             if (key.worldUuid() != null && !key.worldUuid().equals(p.world())) {
                 continue;
             }
-            double distanceSq = edgeDistanceSquared(key, p.x(), p.z());
+            double distanceSq = corridorDistanceSquared(key, p);
             double protectedRadius = p.viewBlocks() + margin;
             if (distanceSq <= protectedRadius * protectedRadius) {
                 return Double.NaN;
@@ -631,11 +628,80 @@ public class ZoneDormancyMap {
         return minSq;
     }
 
+    static double corridorDistanceSquared(ZoneKey key, PlayerPos player) {
+        double regionBlocks = ZoneKey.regionChunks() * 16.0D;
+        double minX = key.regionX() * regionBlocks;
+        double maxX = minX + regionBlocks;
+        double minZ = key.regionZ() * regionBlocks;
+        double maxZ = minZ + regionBlocks;
+        if (segmentIntersectsAabb(player.x(), player.z(), player.predictedX(), player.predictedZ(),
+                minX, maxX, minZ, maxZ)) {
+            return 0.0D;
+        }
+        double min = Math.min(edgeDistanceSquared(key, player.x(), player.z()),
+                edgeDistanceSquared(key, player.predictedX(), player.predictedZ()));
+        min = Math.min(min, pointToSegmentSquared(minX, minZ, player));
+        min = Math.min(min, pointToSegmentSquared(minX, maxZ, player));
+        min = Math.min(min, pointToSegmentSquared(maxX, minZ, player));
+        return Math.min(min, pointToSegmentSquared(maxX, maxZ, player));
+    }
+
+    private static boolean segmentIntersectsAabb(double x0, double z0, double x1, double z1,
+                                                  double minX, double maxX, double minZ, double maxZ) {
+        if ((x0 >= minX && x0 <= maxX && z0 >= minZ && z0 <= maxZ)
+                || (x1 >= minX && x1 <= maxX && z1 >= minZ && z1 <= maxZ)) {
+            return true;
+        }
+        double segmentX = x1 - x0;
+        double segmentZ = z1 - z0;
+        if (segmentX * segmentX + segmentZ * segmentZ <= 1.0E-9D) {
+            return false;
+        }
+        return segmentsIntersect(x0, z0, x1, z1, minX, minZ, maxX, minZ)
+                || segmentsIntersect(x0, z0, x1, z1, maxX, minZ, maxX, maxZ)
+                || segmentsIntersect(x0, z0, x1, z1, maxX, maxZ, minX, maxZ)
+                || segmentsIntersect(x0, z0, x1, z1, minX, maxZ, minX, minZ);
+    }
+
+    private static boolean segmentsIntersect(double ax, double az, double bx, double bz,
+                                             double cx, double cz, double dx, double dz) {
+        double abC = cross(ax, az, bx, bz, cx, cz);
+        double abD = cross(ax, az, bx, bz, dx, dz);
+        double cdA = cross(cx, cz, dx, dz, ax, az);
+        double cdB = cross(cx, cz, dx, dz, bx, bz);
+        return abC * abD <= 0.0D && cdA * cdB <= 0.0D;
+    }
+
+    private static double cross(double ax, double az, double bx, double bz, double px, double pz) {
+        return (bx - ax) * (pz - az) - (bz - az) * (px - ax);
+    }
+
+    private static double pointToSegmentSquared(double px, double pz, PlayerPos player) {
+        double dx = player.predictedX() - player.x();
+        double dz = player.predictedZ() - player.z();
+        double lengthSq = dx * dx + dz * dz;
+        if (lengthSq <= 1.0E-9D) {
+            double ox = px - player.x();
+            double oz = pz - player.z();
+            return ox * ox + oz * oz;
+        }
+        double t = ((px - player.x()) * dx + (pz - player.z()) * dz) / lengthSq;
+        t = Math.max(0.0D, Math.min(1.0D, t));
+        double ox = px - (player.x() + t * dx);
+        double oz = pz - (player.z() + t * dz);
+        return ox * ox + oz * oz;
+    }
+
     private static double distanceFromSquared(double distanceSq) {
         return Double.isInfinite(distanceSq) ? Double.MAX_VALUE : Math.sqrt(distanceSq);
     }
 
-    record PlayerPos(java.util.UUID world, double x, double z, double viewBlocks) {
+    record PlayerPos(java.util.UUID world, double x, double z,
+                     double predictedX, double predictedZ, double viewBlocks) {
+
+        PlayerPos(java.util.UUID world, double x, double z, double viewBlocks) {
+            this(world, x, z, x, z, viewBlocks);
+        }
     }
 
     static boolean qualifiesForUnload(ZoneState state, MemoryTier heapTier, MemoryTier minDormantUnloadTier) {

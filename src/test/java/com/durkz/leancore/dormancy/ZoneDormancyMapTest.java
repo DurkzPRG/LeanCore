@@ -307,6 +307,15 @@ class ZoneDormancyMapTest {
         assertFalse(ZoneDormancyMap.revisitProtects(false, MemoryTier.TIGHT, 0.99D, threshold));
     }
 
+    @Test
+    void predictedCorridorProtectsZonesBetweenCurrentAndFuturePosition() {
+        ZoneKey middle = new ZoneKey(WORLD, 3, 0);
+        ZoneDormancyMap.PlayerPos moving = new ZoneDormancyMap.PlayerPos(
+                WORLD, 0.0D, 0.0D, 400.0D, 0.0D, 0.0D);
+
+        assertTrue(ZoneDormancyMap.isProtectedByView(middle, List.of(moving)));
+    }
+
     private static double oldEdgeDistance(ZoneKey key, double px, double pz) {
         double regionBlocks = ZoneKey.regionChunks() * 16.0D;
         double minX = key.regionX() * regionBlocks;

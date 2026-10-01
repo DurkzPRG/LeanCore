@@ -49,7 +49,6 @@ public class LearningStore {
     private final OnlineLinearDemandModel demandModel;
     private final ActivityClassifierModel activityClassifier;
     private final UnloadOutcomeTracker unloadOutcomeTracker;
-    private final HoldoutCohortTracker holdoutCohort = new HoldoutCohortTracker();
     private final PolicyBlacklistTracker policyBlacklist = new PolicyBlacklistTracker();
     private final ZoneReuseModel zoneReuseModel = new ZoneReuseModel();
 
@@ -116,10 +115,6 @@ public class LearningStore {
         return unloadOutcomeTracker;
     }
 
-    public HoldoutCohortTracker holdoutCohort() {
-        return holdoutCohort;
-    }
-
     public PolicyBlacklistTracker policyBlacklist() {
         return policyBlacklist;
     }
@@ -150,14 +145,31 @@ public class LearningStore {
             return;
         }
         for (Map.Entry<UUID, RetentionDemand> entry : demands.entrySet()) {
-            if (HoldoutSet.isHoldout(entry.getKey())) {
-                continue;
-            }
             PlayerFeatureState state = features.get(entry.getKey());
             if (state == null) {
                 continue;
             }
             demandModel.onOutcome(entry.getKey(), state, entry.getValue().demand(), reward, nowMs);
+        }
+        markDirty();
+    }
+
+    public void reinforceLiteDemandOnRevisit(
+            Map<UUID, RetentionDemand> demands,
+            Map<UUID, PlayerFeatureState> features,
+            int revisitDelta,
+            long nowMs
+    ) {
+        if (!config.liteLearningEnabled || revisitDelta <= 0 || demands == null || features == null) {
+            return;
+        }
+        for (Map.Entry<UUID, RetentionDemand> entry : demands.entrySet()) {
+            PlayerFeatureState state = features.get(entry.getKey());
+            if (state == null) {
+                continue;
+            }
+            double target = Math.min(1.0D, entry.getValue().demand() + 0.15D * revisitDelta);
+            demandModel.onOutcome(entry.getKey(), state, target, 1.0D, nowMs);
         }
         markDirty();
     }
@@ -492,10 +504,6 @@ public class LearningStore {
                 + " | " + demandModel.statusLine()
                 + " | activityUpdates=" + activityClassifier.updates()
                 + " | banditCtx=v1 dim=" + PolicyBandit.CONTEXT_DIM;
-    }
-
-    public String holdoutStatusLine() {
-        return holdoutCohort.statusLine(System.currentTimeMillis());
     }
 
     public String windowLine() {

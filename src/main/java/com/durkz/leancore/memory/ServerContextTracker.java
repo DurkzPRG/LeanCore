@@ -74,6 +74,17 @@ public class ServerContextTracker {
         return next;
     }
 
+    public MemoryTier resolveTier(double adaptiveRatio, double rawHeapRatio, MemoryTier predictedTier) {
+        MemoryTier adaptive = resolveTier(adaptiveRatio);
+        MemoryTier fixed = tierForFixed(rawHeapRatio);
+        MemoryTier strongest = adaptive.ordinal() >= fixed.ordinal() ? adaptive : fixed;
+        if (predictedTier != null && predictedTier.ordinal() > strongest.ordinal()) {
+            strongest = predictedTier;
+            lastTier = strongest;
+        }
+        return strongest;
+    }
+
     public double q50() {
         return q50;
     }
@@ -111,16 +122,7 @@ public class ServerContextTracker {
 
     private MemoryTier resolveFixed(double heapRatio) {
         MemoryTier prev = lastTier;
-        MemoryTier raw;
-        if (heapRatio >= config.criticalHeapRatio) {
-            raw = MemoryTier.CRITICAL;
-        } else if (heapRatio >= config.tightHeapRatio) {
-            raw = MemoryTier.TIGHT;
-        } else if (heapRatio >= config.watchHeapRatio) {
-            raw = MemoryTier.WATCH;
-        } else {
-            raw = MemoryTier.COMFORT;
-        }
+        MemoryTier raw = tierForFixed(heapRatio);
         MemoryTier next = raw;
         boolean hysteresis = false;
         if (next.ordinal() < prev.ordinal()) {
@@ -130,6 +132,17 @@ public class ServerContextTracker {
         lastTier = next;
         logTierChange(prev, next, heapRatio, false, hysteresis);
         return next;
+    }
+
+    private MemoryTier tierForFixed(double heapRatio) {
+        if (heapRatio >= config.criticalHeapRatio) {
+            return MemoryTier.CRITICAL;
+        } else if (heapRatio >= config.tightHeapRatio) {
+            return MemoryTier.TIGHT;
+        } else if (heapRatio >= config.watchHeapRatio) {
+            return MemoryTier.WATCH;
+        }
+        return MemoryTier.COMFORT;
     }
 
     private void logTierChange(MemoryTier prev, MemoryTier next, double heapRatio,
@@ -161,6 +174,9 @@ public class ServerContextTracker {
         q75 = Math.max(q75, q50 + 0.02D);
         q90 = Math.max(q90, q75 + 0.02D);
         q97 = Math.max(q97, q90 + 0.02D);
+        q75 = Math.min(q75, config.watchHeapRatio);
+        q90 = Math.min(q90, config.tightHeapRatio);
+        q97 = Math.min(q97, config.criticalHeapRatio);
     }
 
     private static double percentile(List<Double> sorted, double p) {

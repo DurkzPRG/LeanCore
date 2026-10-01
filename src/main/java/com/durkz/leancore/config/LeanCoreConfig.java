@@ -145,7 +145,7 @@ public class LeanCoreConfig {
     // v1.6.0 Frente 2 reward: a zone returning to HOT within this window after we unloaded it is
     // counted as a false cut. The count is always tracked for observability (/leancore learn);
     // folding it into the bandit reward is gated by zoneFalseCutRewardEnabled (off by default until
-    // validated on the holdout, per roadmap risk discipline).
+    // validated through attributed action windows before enabling it by default).
     public int zoneRevisitAfterUnloadWindowSeconds = 120;
     public boolean zoneFalseCutRewardEnabled = false;
 
@@ -166,7 +166,7 @@ public class LeanCoreConfig {
     // v1.7.0 Frente C: hot/simulation radius actuator. Mirrors the view-radius governor but drives
     // ChunkTracker.setMaxHotLoadedRadius (ticking radius, separate from view radius), cutting
     // CPU/heap of simulated chunks without the view-radius pop-in. On by default since 1.7.0; respects
-    // the same grace + holdout discipline as the view-radius governor.
+    // the same streaming grace as the view-radius governor.
     public boolean hotRadiusGovernanceEnabled = true;
     public int minHotLoadedChunksRadius = 2;
     public int maxHotLoadedChunksRadius = 8;

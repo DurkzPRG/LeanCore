@@ -13,7 +13,7 @@ public final class ChunkPressureModel {
     private static final double EXPLORE_DELTA_WEIGHT = 0.5D;
     private static final double MAX_EXPLORE_STRESS = 32.0D;
 
-    /** Matches {@code ChunkUtil.HEIGHT_SECTIONS} on Hytale 0.6 (Y 0..9). */
+    /** Y sections 0..9: world height on 0.6, force-loaded range on 0.7. */
     static final int HEIGHT_SECTIONS = 10;
 
     private static final int BUDGET_CACHE_SIZE = 65;

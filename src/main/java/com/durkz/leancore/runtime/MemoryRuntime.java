@@ -22,6 +22,7 @@ import com.durkz.leancore.memory.MemoryPressureSensor;
 import com.durkz.leancore.memory.MemorySnapshot;
 import com.durkz.leancore.memory.SessionSavingsTracker;
 import com.durkz.leancore.memory.PolicyApplier;
+import com.durkz.leancore.memory.PolicyActionLedger;
 import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
@@ -71,6 +72,7 @@ public class MemoryRuntime {
     private final EngineUnloadPoller engineUnloadPoller = new EngineUnloadPoller();
     private final LoadedChunkSetTracker loadedChunkSetTracker = new LoadedChunkSetTracker();
     private final GcHintScheduler gcHintScheduler;
+    private final PolicyActionLedger actionLedger = new PolicyActionLedger();
     private ChunkSaturationSampler chunkSaturationSampler;
     private ChunkPrefetcher chunkPrefetcher;
     private final ThreadLocal<WorldBatchScratch> worldBatchScratch = ThreadLocal.withInitial(WorldBatchScratch::new);
@@ -88,6 +90,7 @@ public class MemoryRuntime {
     private ScheduledFuture<?> tickFuture;
     private ScheduledFuture<?> persistFuture;
     private ScheduledFuture<?> motionFuture;
+    private ScheduledFuture<?> pressureFuture;
     private long lastDormancyRefreshMs;
     private long lastLiteHeapSampleMs;
     private double lastLiteX;
@@ -95,6 +98,11 @@ public class MemoryRuntime {
     private boolean lastLitePositioned;
     private long lastDeferredGovernorLogMs;
     private long liteSessionStartedMs;
+    private boolean fastPressureEscalation;
+    private MemoryTier lastFastPressureTier = MemoryTier.COMFORT;
+    private long lastFastPressureTriggerMs;
+    private String lastLedgerPolicyKey;
+    private int lastLiteLearningRevisits;
 
     public MemoryRuntime(
             LeanCorePlugin plugin,
@@ -135,7 +143,7 @@ public class MemoryRuntime {
             LearningStore learningStore
     ) {
         SessionSavingsTracker sessionSavings = new SessionSavingsTracker();
-        MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext(), sessionSavings);
+        MemoryPressureSensor sensor = new MemoryPressureSensor(learningStore.serverContext(), sessionSavings, config);
         sensor.setPositionSource(classifier.features());
         ZoneDormancyMap dormancyMap = new ZoneDormancyMap(config);
         dormancyMap.setPredictedPositionSource(classifier.features());
@@ -184,6 +192,7 @@ public class MemoryRuntime {
         scheduleTick(initialDelay);
         schedulePersistIfNeeded();
         scheduleMotionTickIfNeeded();
+        schedulePressureSampling();
         if (config.dedicatedServerMode && config.viewRadiusGovernanceEnabled) {
             governor.setViewRadiusGraceUntilMs(System.currentTimeMillis() + DedicatedBootstrap.VIEW_RADIUS_GRACE_MS);
         }
@@ -286,6 +295,10 @@ public class MemoryRuntime {
         if (motionFuture != null) {
             motionFuture.cancel(true);
             motionFuture = null;
+        }
+        if (pressureFuture != null) {
+            pressureFuture.cancel(true);
+            pressureFuture = null;
         }
         stopScheduler();
         persistLearning();
@@ -512,7 +525,6 @@ public class MemoryRuntime {
         MemorySnapshot sample = sensor.sample();
         lastSample = sample;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
-        learningStore.holdoutCohort().noteOnline(online, sample.heapUsedRatio(), nowMs);
 
         if (profile.tracksPlayerMotion()) {
             classifier.samplePositionsLite(online, nowMs);
@@ -555,7 +567,6 @@ public class MemoryRuntime {
         MemorySnapshot sample = sensor.sample();
         lastSample = sample;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
-        learningStore.holdoutCohort().noteOnline(online, sample.heapUsedRatio(), nowMs);
 
         var demands = classifier.snapshotDemands(nowMs);
         if (profile.runsLearning(config)) {
@@ -757,6 +768,39 @@ public class MemoryRuntime {
     private record WorldBatch(UUID worldUuid, World world, List<PlayerRef> players) {
     }
 
+    private void schedulePressureSampling() {
+        if (!running || scheduler == null) {
+            return;
+        }
+        pressureFuture = scheduler.scheduleAtFixedRate(this::samplePressureFast, 5L, 5L, TimeUnit.SECONDS);
+    }
+
+    private void samplePressureFast() {
+        if (!running || !config.enabled || activeProfile != RuntimeProfile.LITE) {
+            return;
+        }
+        MemorySnapshot sample = sensor.sample(false);
+        lastSample = sample;
+        actionLedger.observe(sample, dormancyMap.revisitAfterUnloadCount(),
+                learningStore.unloadOutcomeTracker().engineUnloads(), System.currentTimeMillis());
+        MemoryTier previous = lastFastPressureTier;
+        lastFastPressureTier = sample.tier();
+        long nowMs = System.currentTimeMillis();
+        if (sample.tier().ordinal() <= previous.ordinal() || nowMs - lastFastPressureTriggerMs < 10_000L) {
+            return;
+        }
+        lastFastPressureTriggerMs = nowMs;
+        fastPressureEscalation = true;
+        if (tickFuture != null) {
+            tickFuture.cancel(false);
+        }
+        DiagnosticLog.info(String.format(Locale.ROOT,
+                "fast pressure escalation %s -> %s reason=%s heap=%.0f%% old=%.0f%%",
+                previous, sample.tier(), sample.pressureReason(), sample.heapUsedRatio() * 100.0D,
+                sample.oldGenUsedRatio() * 100.0D));
+        scheduleTick(0L);
+    }
+
     /** Runtime scheduler is single-threaded, so grouping buffers can be reused between passes. */
     private static final class WorldBatchScratch {
 
@@ -840,11 +884,13 @@ public class MemoryRuntime {
             }
         }
 
-        if (!SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {
+        if (!fastPressureEscalation
+                && !SoloRuntimePolicy.shouldSampleHeap(config, nowMs, lastLiteHeapSampleMs)) {
             return;
         }
 
         MemorySnapshot sample = sensor.sample(false);
+        fastPressureEscalation = false;
         lastSample = sample;
         lastLiteHeapSampleMs = nowMs;
         lastMode = sessionDetector.detect(sample.onlinePlayers());
@@ -857,6 +903,13 @@ public class MemoryRuntime {
 
         var demands = classifier.snapshotDemands(nowMs);
         if (activeProfile.runsLiteLearning(config)) {
+            int revisits = dormancyMap.revisitAfterUnloadCount();
+            int revisitDelta = Math.max(0, revisits - lastLiteLearningRevisits);
+            if (revisitDelta > 0) {
+                learningStore.reinforceLiteDemandOnRevisit(
+                        demands, classifier.features().snapshot(), revisitDelta, nowMs);
+            }
+            lastLiteLearningRevisits = revisits;
             learningStore.noteHeap(sample.heapUsedRatio());
             learningStore.noteTier(sample.tier());
             learningStore.noteDemands(demands);
@@ -875,6 +928,7 @@ public class MemoryRuntime {
         GovernorStatus govStatus = governor.status();
         if (govStatus.enabled()) {
             sessionSavings.noteGovernorTick(govStatus.demotedZones(), govStatus.reclaimedMbEstimate());
+            recordLiteAction(sample, govStatus, nowMs);
         }
         noteEngineUnloadYieldIfNeeded();
 
@@ -885,6 +939,18 @@ public class MemoryRuntime {
         if (zoneChunkUnloader != null && zoneChunkUnloader.lastSweepYieldedToEngine()) {
             sessionSavings.noteEngineUnloadYield();
         }
+    }
+
+    private void recordLiteAction(MemorySnapshot sample, GovernorStatus status, long nowMs) {
+        String policyKey = status.policy() != null ? status.policy().key() : "none";
+        boolean policyChanged = !policyKey.equals(lastLedgerPolicyKey);
+        if (policyChanged || status.unloadedChunks() > 0) {
+            String action = policyChanged ? "policy:" + policyKey : "unload:" + status.unloadedChunks();
+            actionLedger.record(action, sample, dormancyMap.revisitAfterUnloadCount(),
+                    learningStore.unloadOutcomeTracker().engineUnloads(),
+                    status.unloadCandidateZones(), nowMs);
+        }
+        lastLedgerPolicyKey = policyKey;
     }
 
     private double sampleChunkSaturation() {
@@ -901,6 +967,10 @@ public class MemoryRuntime {
 
     public GcHintScheduler gcHintScheduler() {
         return gcHintScheduler;
+    }
+
+    public PolicyActionLedger actionLedger() {
+        return actionLedger;
     }
 
     /** First online player's last on-world-sampled (x,z), or null. Identity reads only, no transform. */

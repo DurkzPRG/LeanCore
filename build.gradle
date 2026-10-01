@@ -29,6 +29,10 @@ def resolveHytaleHome = {
 
 ext {
     hytaleHome = resolveHytaleHome()
+    // -Pserver_jar=... compiles against a server JAR built from the shared source (pre-release work).
+    serverJar = project.hasProperty('server_jar')
+            ? project.findProperty('server_jar').toString()
+            : "${hytaleHome}/install/${patchline}/package/game/latest/Server/HytaleServer.jar"
 }
 
 if (!file(hytaleHome).exists()) {
@@ -48,8 +52,8 @@ javadoc {
 }
 
 dependencies {
-    compileOnly(files("${hytaleHome}/install/${patchline}/package/game/latest/Server/HytaleServer.jar"))
-    testImplementation(files("${hytaleHome}/install/${patchline}/package/game/latest/Server/HytaleServer.jar"))
+    compileOnly(files(serverJar))
+    testImplementation(files(serverJar))
 
     if (file('libs').exists()) {
         fileTree(dir: 'libs', include: ['*.jar']).each { jarFile ->

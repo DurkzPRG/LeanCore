@@ -7,7 +7,6 @@ import com.durkz.leancore.runtime.RuntimeProfile;
 import com.durkz.leancore.runtime.WorldDispatch;
 import com.durkz.leancore.intelligence.FalseCutTracker;
 import com.durkz.leancore.intelligence.HeuristicDemandModel;
-import com.durkz.leancore.intelligence.HoldoutSet;
 import com.durkz.leancore.intelligence.LoadingPressureGate;
 import com.durkz.leancore.intelligence.PlayerBehavior;
 import com.durkz.leancore.intelligence.RetentionDemand;
@@ -184,9 +183,6 @@ public class PolicyApplier {
             viewRadiusCache.noteBaseViewRadius(playerId, target);
         }
 
-        if (HoldoutSet.isHoldout(playerId) && profile != RuntimeProfile.LITE && target < current) {
-            return;
-        }
         if (profile == RuntimeProfile.LITE && target < current && HeuristicDemandModel.isHighDemand(demand.demand())) {
             return;
         }
@@ -294,8 +290,7 @@ public class PolicyApplier {
     /**
      * Hot/simulation radius actuator (v1.7.0 Frente C). Drives {@code setMaxHotLoadedRadius}
      * (ticking radius) from the active policy, cutting simulation cost without the view-radius
-     * pop-in. Runs on each player's world thread; shrinks are skipped for holdout players so the
-     * cohort comparison stays clean. No-op unless {@code hotRadiusGovernanceEnabled}.
+     * pop-in. Runs on each player's world thread. No-op unless {@code hotRadiusGovernanceEnabled}.
      */
     public void applyHotRadius(GovernorPolicy policy, Collection<PlayerRef> online) {
         if (policy == null || online == null || !RuntimeGuard.active()
@@ -350,9 +345,6 @@ public class PolicyApplier {
             return;
         }
         int current = tracker.getMaxHotLoadedRadius();
-        if (HoldoutSet.isHoldout(playerRef.getUuid()) && target < current) {
-            return;
-        }
         // Streaming grace: hold the hot-radius cut while this player streams (unless CRITICAL).
         if (config.loadingPressureSignalEnabled && !criticalCut && target < current
                 && LoadingPressureGate.holdsUnload(config, Math.max(0, tracker.getLoadingSectionsCount()))) {
@@ -375,8 +367,7 @@ public class PolicyApplier {
      * Adaptive chunk-throughput actuator. Scales each player's chunk send-rate
      * ({@code setMaxSectionsPerSecond} / {@code setMaxSectionsPerTick}) by memory tier, as a percentage
      * of their connection-aware engine baseline (captured once, before we change it). Runs on each
-     * player's world thread. No-op unless {@code chunkThroughputGovernanceEnabled}. Reductions are
-     * skipped for holdout players so the cohort comparison stays clean.
+     * player's world thread. No-op unless {@code chunkThroughputGovernanceEnabled}.
      */
     public void applyChunkThroughput(MemoryTier tier, Collection<PlayerRef> online) {
         if (tier == null || online == null || !RuntimeGuard.active()
@@ -422,14 +413,12 @@ public class PolicyApplier {
         int backlog = Math.max(0, tracker.getLoadingSectionsCount());
         int targetSec = ChunkThroughputModel.targetPerSecond(config, tier, baseline[0], backlog);
         int targetTick = ChunkThroughputModel.targetPerTick(config, tier, baseline[1], backlog);
-        boolean holdout = HoldoutSet.isHoldout(playerId);
-
         int currentSec = tracker.getMaxSectionsPerSecond();
-        if (targetSec != currentSec && !(holdout && targetSec < currentSec)) {
+        if (targetSec != currentSec) {
             tracker.setMaxSectionsPerSecond(targetSec);
         }
         int currentTick = tracker.getMaxSectionsPerTick();
-        if (targetTick != currentTick && !(holdout && targetTick < currentTick)) {
+        if (targetTick != currentTick) {
             tracker.setMaxSectionsPerTick(targetTick);
         }
     }
