@@ -233,8 +233,8 @@ public class LeanCoreConfig {
     public double chunkRetentionMbPerChunk = 1.0D;
     public int chunkRetentionMaxChunks = 2048;
     public int chunkRetentionMaxHoldSeconds = 600;
-    /** Near the budget, only chunks this close to a player stay held. */
-    public int chunkRetentionRingBlocks = 384;
+    /** Chunks are held nearest-first; nothing farther than this from an online player is held. */
+    public int chunkRetentionMaxDistanceBlocks = 1024;
 
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
@@ -547,7 +547,7 @@ public class LeanCoreConfig {
         chunkRetentionMbPerChunk = Math.max(0.10D, Math.min(16.0D, chunkRetentionMbPerChunk));
         chunkRetentionMaxChunks = Math.max(0, Math.min(16_384, chunkRetentionMaxChunks));
         chunkRetentionMaxHoldSeconds = Math.max(30, Math.min(3600, chunkRetentionMaxHoldSeconds));
-        chunkRetentionRingBlocks = Math.max(64, Math.min(4096, chunkRetentionRingBlocks));
+        chunkRetentionMaxDistanceBlocks = Math.max(128, Math.min(8192, chunkRetentionMaxDistanceBlocks));
         dedicatedViewRadiusGraceSeconds = Math.max(0, Math.min(3600, dedicatedViewRadiusGraceSeconds));
         chunkRateBrakeTightPerSecond = Math.max(8, Math.min(2560, chunkRateBrakeTightPerSecond));
         chunkRateBrakeCriticalPerSecond = Math.max(8, Math.min(chunkRateBrakeTightPerSecond, chunkRateBrakeCriticalPerSecond));

@@ -11,6 +11,8 @@ import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.component.ChunkUnloadingSystem;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -39,7 +41,6 @@ import java.util.concurrent.atomic.LongAdder;
  */
 public final class ChunkRetention {
 
-    private static final double NEAR_FULL = 0.9D;
     private static final double BYTES_PER_MB = 1024.0D * 1024.0D;
     /**
      * New holds per world scan (every 2s). The post-GC reading lags a few GC cycles; taking the whole
@@ -85,7 +86,7 @@ public final class ChunkRetention {
         Map<Long, Held> mine = held.computeIfAbsent(worldUuid, ignored -> new HashMap<>());
         ChunkStore chunkStore = world.getChunkStore();
         long maxHoldMs = Math.max(0, config.chunkRetentionMaxHoldSeconds) * 1000L;
-        int ring = config.chunkRetentionRingBlocks;
+        int maxDistance = config.chunkRetentionMaxDistanceBlocks;
         int currentBudget = players.length == 0 ? 0 : budget;
 
         Iterator<Map.Entry<Long, Held>> it = mine.entrySet().iterator();
@@ -107,8 +108,7 @@ public final class ChunkRetention {
                 returned.increment();
                 continue;
             }
-            if (!decide(heldCount.get(), currentBudget, nowMs - h.sinceMs, maxHoldMs,
-                    nearestDistance(players, ChunkUtil.xOfChunkIndex(index), ChunkUtil.zOfChunkIndex(index)), ring)) {
+            if (currentBudget <= 0 || !keeps(nowMs - h.sinceMs, maxHoldMs, distanceOf(players, index), maxDistance)) {
                 h.chunk.removeKeepLoaded();
                 it.remove();
                 heldCount.decrementAndGet();
@@ -116,28 +116,51 @@ public final class ChunkRetention {
             }
         }
 
-        if (currentBudget > heldCount.get()) {
-            int taken = 0;
+        // Over budget: let the farthest go first.
+        int excess = mine.size() - currentBudget;
+        if (excess > 0) {
+            List<Candidate> byDistance = new ArrayList<>(mine.size());
+            for (long index : mine.keySet()) {
+                byDistance.add(new Candidate(index, distanceOf(players, index)));
+            }
+            byDistance.sort(Comparator.comparingDouble(Candidate::distance).reversed());
+            for (int i = 0; i < excess; i++) {
+                Held h = mine.remove(byDistance.get(i).index());
+                h.chunk.removeKeepLoaded();
+                heldCount.decrementAndGet();
+                released.increment();
+            }
+        }
+
+        // Room left: take the chunks nearest to a player first; the trail of someone who left the
+        // area is the least likely to be walked back into.
+        int room = Math.min(currentBudget - heldCount.get(), MAX_NEW_HOLDS_PER_SCAN);
+        if (room > 0) {
+            List<Candidate> candidates = new ArrayList<>();
             LongIterator indexes = chunkStore.getChunkIndexes().iterator();
-            while (indexes.hasNext() && heldCount.get() < currentBudget && taken < MAX_NEW_HOLDS_PER_SCAN) {
+            while (indexes.hasNext()) {
                 long index = indexes.nextLong();
-                if (mine.containsKey(index)
+                if (mine.containsKey(index)) {
+                    continue;
+                }
+                double distance = distanceOf(players, index);
+                if (distance > maxDistance
                         || ChunkUnloadingSystem.getChunkVisibility(chunkStore, trackers, index) != ChunkTracker.ChunkVisibility.NONE) {
                     continue;
                 }
                 WorldChunk chunk = chunkStore.getChunkComponent(index, WorldChunk.getComponentType());
                 if (chunk == null || chunk.shouldKeepLoaded()) {
+                    // Someone else keeps it (spawn region, another system): not ours to spend budget on.
                     continue;
                 }
-                if (!decide(heldCount.get() + 1, currentBudget, 0L, maxHoldMs,
-                        nearestDistance(players, ChunkUtil.xOfChunkIndex(index), ChunkUtil.zOfChunkIndex(index)), ring)) {
-                    continue;
-                }
+                candidates.add(new Candidate(index, distance));
+            }
+            for (Candidate c : nearestFirst(candidates, room)) {
+                WorldChunk chunk = chunkStore.getChunkComponent(c.index(), WorldChunk.getComponentType());
                 chunk.addKeepLoaded();
-                mine.put(index, new Held(chunk, nowMs));
+                mine.put(c.index(), new Held(chunk, nowMs));
                 heldCount.incrementAndGet();
                 holds.increment();
-                taken++;
             }
         }
         if (mine.isEmpty()) {
@@ -160,20 +183,19 @@ public final class ChunkRetention {
         }
     }
 
-    /**
-     * Pure hold rule. {@code count} includes the chunk being decided.
-     * Below 90% of the budget anything is held; near the budget only chunks within the ring around
-     * a player (the likeliest to be walked back into); over the budget nothing.
-     */
-    static boolean decide(int count, int budget, long heldForMs, long maxHoldMs,
-                          double distanceBlocks, int ringBlocks) {
-        if (budget <= 0 || heldForMs >= maxHoldMs) {
-            return false;
-        }
-        if (count <= budget * NEAR_FULL) {
-            return true;
-        }
-        return count <= budget && distanceBlocks <= ringBlocks;
+    /** Pure keep rule for a chunk already held: not too old and still within reach of a player. */
+    static boolean keeps(long heldForMs, long maxHoldMs, double distanceBlocks, int maxDistanceBlocks) {
+        return heldForMs < maxHoldMs && distanceBlocks <= maxDistanceBlocks;
+    }
+
+    /** The {@code take} candidates closest to a player, nearest first. */
+    static List<Candidate> nearestFirst(List<Candidate> candidates, int take) {
+        candidates.sort(Comparator.comparingDouble(Candidate::distance));
+        return candidates.subList(0, Math.min(take, candidates.size()));
+    }
+
+    private static double distanceOf(double[] players, long index) {
+        return nearestDistance(players, ChunkUtil.xOfChunkIndex(index), ChunkUtil.zOfChunkIndex(index));
     }
 
     /**
@@ -228,5 +250,8 @@ public final class ChunkRetention {
     }
 
     private record Held(WorldChunk chunk, long sinceMs) {
+    }
+
+    record Candidate(long index, double distance) {
     }
 }

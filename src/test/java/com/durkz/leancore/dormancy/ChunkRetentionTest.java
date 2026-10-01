@@ -5,6 +5,9 @@ import com.durkz.leancore.memory.MemorySnapshot;
 import com.durkz.leancore.memory.MemoryTier;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,24 +16,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ChunkRetentionTest {
 
     private static final long MB = 1024L * 1024L;
-
-    @Test
-    void holdsFreelyBelowNinetyPercentOfBudget() {
-        assertTrue(ChunkRetention.decide(50, 100, 0L, 600_000L, 10_000.0D, 384));
-    }
-
-    @Test
-    void nearBudgetOnlyKeepsChunksInsideTheRing() {
-        assertTrue(ChunkRetention.decide(95, 100, 0L, 600_000L, 200.0D, 384));
-        assertFalse(ChunkRetention.decide(95, 100, 0L, 600_000L, 900.0D, 384));
-    }
-
-    @Test
-    void overBudgetOrTooOldOrNoBudgetReleases() {
-        assertFalse(ChunkRetention.decide(101, 100, 0L, 600_000L, 10.0D, 384));
-        assertFalse(ChunkRetention.decide(1, 100, 600_000L, 600_000L, 10.0D, 384));
-        assertFalse(ChunkRetention.decide(1, 0, 0L, 600_000L, 10.0D, 384));
-    }
 
     @Test
     void budgetIsHeadroomUnderPostGcCeilingPlusWhatIsHeld() {
@@ -69,16 +54,38 @@ class ChunkRetentionTest {
     }
 
     @Test
-    void withSeveralPlayersTheRingFollowsTheNearestOne() {
-        // Three players spread over the map; a chunk near the third must count as close.
+    void keepsWhileYoungAndWithinReach() {
+        assertTrue(ChunkRetention.keeps(0L, 600_000L, 500.0D, 1024));
+        assertFalse(ChunkRetention.keeps(600_000L, 600_000L, 500.0D, 1024));
+        assertFalse(ChunkRetention.keeps(0L, 600_000L, 1500.0D, 1024));
+    }
+
+    @Test
+    void candidatesNearAPlayerWinOverTheTrailOfSomeoneWhoLeft() {
+        // Player at the origin; a trail far away competes with chunks next to the player.
+        double[] players = {16.0D, 16.0D};
+        List<ChunkRetention.Candidate> candidates = new ArrayList<>();
+        for (int x = 25; x < 30; x++) {
+            candidates.add(new ChunkRetention.Candidate(x, ChunkRetention.nearestDistance(players, x, 0)));
+        }
+        for (int x = 1; x < 4; x++) {
+            candidates.add(new ChunkRetention.Candidate(x, ChunkRetention.nearestDistance(players, x, 0)));
+        }
+        List<ChunkRetention.Candidate> picked = ChunkRetention.nearestFirst(candidates, 3);
+        assertEquals(3, picked.size());
+        for (ChunkRetention.Candidate c : picked) {
+            assertTrue(c.distance() < 200.0D, "picked a far chunk: " + c);
+        }
+        assertTrue(picked.get(0).distance() <= picked.get(2).distance());
+    }
+
+    @Test
+    void withSeveralPlayersDistanceFollowsTheNearestOne() {
         double[] players = {16.0D, 16.0D, 5000.0D, 16.0D, 16.0D, -9000.0D};
         assertEquals(0.0D, ChunkRetention.nearestDistance(players, 0, 0), 1e-9);
-        assertEquals(0.0D, ChunkRetention.nearestDistance(players, 0, -282), 16.0D);
-        double farFromAll = ChunkRetention.nearestDistance(players, 80, 80);
-        assertTrue(farFromAll > 2000.0D);
-        assertTrue(ChunkRetention.decide(95, 100, 0L, 600_000L,
-                ChunkRetention.nearestDistance(players, 156, 0), 384));
-        assertFalse(ChunkRetention.decide(95, 100, 0L, 600_000L, farFromAll, 384));
+        assertTrue(ChunkRetention.nearestDistance(players, 0, -282) < 16.0D);
+        assertTrue(ChunkRetention.nearestDistance(players, 156, 0) < 16.0D);
+        assertTrue(ChunkRetention.nearestDistance(players, 80, 80) > 2000.0D);
     }
 
     private static MemorySnapshot snapshot(MemoryTier tier, long max, long postGc) {

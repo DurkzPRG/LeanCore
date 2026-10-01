@@ -150,7 +150,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `chunkRetentionMbPerChunk` | `1.0` | Heap estimate per held chunk, used for the budget |
 | `chunkRetentionMaxChunks` | `2048` | Hard cap on held chunks |
 | `chunkRetentionMaxHoldSeconds` | `600` | Release a held chunk after this long |
-| `chunkRetentionRingBlocks` | `384` | Near the budget, only chunks this close to a player stay held |
+| `chunkRetentionMaxDistanceBlocks` | `1024` | Chunks are held nearest-first; nothing farther than this from an online player |
 | `chunkRateBrakeEnabled` | `true` | Brake chunk streaming on TIGHT/CRITICAL (off while QuantumHy is loaded) |
 | `chunkRateBrakeTightPerSecond` | `512` | Sections/s cap per player on TIGHT |
 | `chunkRateBrakeCriticalPerSecond` | `192` | Sections/s cap per player on CRITICAL |
