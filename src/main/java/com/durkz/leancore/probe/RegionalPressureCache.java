@@ -9,7 +9,7 @@ import java.util.Collection;
 import java.util.Locale;
 /**
  * Throttled S4 regional entity pressure for bandit context (not probe-only).
- * Must run on the world thread — governor ticks dispatch here via {@code world.execute}.
+ * Must run on the world thread: governor ticks dispatch here via {@code world.execute}.
  */
 public final class RegionalPressureCache {
 

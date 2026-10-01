@@ -68,6 +68,19 @@ class ChunkRetentionTest {
         assertEquals(Double.MAX_VALUE, ChunkRetention.nearestDistance(new double[0], 0, 0));
     }
 
+    @Test
+    void withSeveralPlayersTheRingFollowsTheNearestOne() {
+        // Three players spread over the map; a chunk near the third must count as close.
+        double[] players = {16.0D, 16.0D, 5000.0D, 16.0D, 16.0D, -9000.0D};
+        assertEquals(0.0D, ChunkRetention.nearestDistance(players, 0, 0), 1e-9);
+        assertEquals(0.0D, ChunkRetention.nearestDistance(players, 0, -282), 16.0D);
+        double farFromAll = ChunkRetention.nearestDistance(players, 80, 80);
+        assertTrue(farFromAll > 2000.0D);
+        assertTrue(ChunkRetention.decide(95, 100, 0L, 600_000L,
+                ChunkRetention.nearestDistance(players, 156, 0), 384));
+        assertFalse(ChunkRetention.decide(95, 100, 0L, 600_000L, farFromAll, 384));
+    }
+
     private static MemorySnapshot snapshot(MemoryTier tier, long max, long postGc) {
         return new MemorySnapshot(postGc, max, (double) postGc / max, 1, 0.0D, tier,
                 0L, 0L, postGc, 0L, 0.0D, 0.0D, Double.POSITIVE_INFINITY, "heap");

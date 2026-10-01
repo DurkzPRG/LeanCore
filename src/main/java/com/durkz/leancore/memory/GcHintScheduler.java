@@ -4,7 +4,7 @@ import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.runtime.RuntimeProfile;
 
 /**
- * Optional JVM GC hint during solo LITE idle windows. Off by default — enable only after profiling.
+ * Optional JVM GC hint during solo LITE idle windows. Off by default; enable only after profiling.
  */
 public final class GcHintScheduler {
 

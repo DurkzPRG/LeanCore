@@ -79,12 +79,12 @@ public class MemoryPressureSensor {
             sessionSavings.noteHeapSample(used, max, nowMs);
         }
         if (trackQuantiles) {
-            serverContext.observe(ratio, nowMs);
+            serverContext.observe(pressure.effectiveRatio(), nowMs);
         }
 
         Collection<PlayerRef> players = Universe.get().getPlayers();
         MemoryTier tier = trackQuantiles
-                ? serverContext.resolveTier(pressure.effectiveRatio(), ratio, pressure.predictedTier())
+                ? serverContext.resolveTier(pressure.effectiveRatio(), pressure.predictedTier())
                 : pressure.predictedTier();
         return new MemorySnapshot(used, max, ratio, players.size(), maxPairwiseSpread(players), tier,
                 oldGen[0], oldGen[1], pressure.postGcHeapUsed(), pressure.allocationBytesPerSecond(),

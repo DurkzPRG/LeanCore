@@ -43,10 +43,12 @@ public class LeanCoreConfig {
     public boolean dedicatedServerMode = false;
     /**
      * Solo embedded: use STANDARD (governor + learning ticks every friendsTickIntervalSeconds)
-     * instead of LITE. Safer than dedicatedServerMode for local dogfood — does not force FULL 5s ticks.
+     * instead of LITE. Safer than dedicatedServerMode for local dogfood: does not force FULL 5s ticks.
      */
     public boolean embeddedStandardProfile = false;
     public boolean dedicatedBootstrapEnabled = true;
+    /** Dedicated hosts: no view-radius cuts for this long after start, while the world warms up. */
+    public int dedicatedViewRadiusGraceSeconds = 600;
     public boolean dedicatedBootstrapApplied = false;
     public int friendsMaxPlayers = 8;
     public int serverDensePlayerThreshold = 9;
@@ -95,7 +97,7 @@ public class LeanCoreConfig {
     public String criticalWebhookUrl = "";
     public int criticalWebhookCooldownSeconds = 300;
 
-    /** LITE + COMFORT + solo idle only. Off by default — experimental for 1.4.x tuning. */
+    /** LITE + COMFORT + solo idle only. Off by default, experimental. */
     public boolean gcHintEnabled = false;
     public int gcHintMinIntervalSeconds = 600;
 
@@ -546,6 +548,7 @@ public class LeanCoreConfig {
         chunkRetentionMaxChunks = Math.max(0, Math.min(16_384, chunkRetentionMaxChunks));
         chunkRetentionMaxHoldSeconds = Math.max(30, Math.min(3600, chunkRetentionMaxHoldSeconds));
         chunkRetentionRingBlocks = Math.max(64, Math.min(4096, chunkRetentionRingBlocks));
+        dedicatedViewRadiusGraceSeconds = Math.max(0, Math.min(3600, dedicatedViewRadiusGraceSeconds));
         chunkRateBrakeTightPerSecond = Math.max(8, Math.min(2560, chunkRateBrakeTightPerSecond));
         chunkRateBrakeCriticalPerSecond = Math.max(8, Math.min(chunkRateBrakeTightPerSecond, chunkRateBrakeCriticalPerSecond));
     }

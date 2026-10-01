@@ -3,7 +3,7 @@ package com.durkz.leancore.intelligence;
 import java.util.Locale;
 
 /**
- * Activity posterior — primary path is {@link ActivityClassifierModel}; EMA fallback before warm-up.
+ * Activity posterior. Primary path is {@link ActivityClassifierModel}; EMA fallback before warm-up.
  */
 public final class BehaviorPosterior {
 

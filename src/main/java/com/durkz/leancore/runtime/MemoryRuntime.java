@@ -200,7 +200,8 @@ public class MemoryRuntime {
         schedulePressureSampling();
         scheduleRetentionUpdates();
         if (config.dedicatedServerMode && config.viewRadiusGovernanceEnabled) {
-            governor.setViewRadiusGraceUntilMs(System.currentTimeMillis() + DedicatedBootstrap.VIEW_RADIUS_GRACE_MS);
+            governor.setViewRadiusGraceUntilMs(
+                    System.currentTimeMillis() + Math.max(0, config.dedicatedViewRadiusGraceSeconds) * 1000L);
         }
         plugin.getLogger().atInfo().log(
                 "Runtime started profile=%s initialDelay=%ds tick=%ds",

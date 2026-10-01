@@ -70,7 +70,7 @@ public class LeanCorePlugin extends JavaPlugin {
         config = LeanCoreConfig.load(getDataDirectory());
         if (DedicatedBootstrap.applyIfNeeded(config)) {
             getLogger().atInfo().log(
-                    "Dedicated bootstrap applied — governEnabled, viewRadiusGovernanceEnabled, "
+                    "Dedicated bootstrap applied: governEnabled, viewRadiusGovernanceEnabled, "
                             + "learningEnabled (unloadEnabled stays false)"
             );
         }
@@ -83,7 +83,7 @@ public class LeanCorePlugin extends JavaPlugin {
 
         if (RuntimeActivationPolicy.isFullyPassive(config)) {
             getLogger().atInfo().log(
-                    "LeanCore %s local passive — set localHostMode AUTO for scaled runtime.",
+                    "LeanCore %s local passive: set localHostMode AUTO for scaled runtime.",
                     getManifest().getVersion()
             );
             return;

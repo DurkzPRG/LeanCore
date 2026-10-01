@@ -74,15 +74,39 @@ public class ServerContextTracker {
         return next;
     }
 
-    public MemoryTier resolveTier(double adaptiveRatio, double rawHeapRatio, MemoryTier predictedTier) {
-        MemoryTier adaptive = resolveTier(adaptiveRatio);
-        MemoryTier fixed = tierForFixed(rawHeapRatio);
-        MemoryTier strongest = adaptive.ordinal() >= fixed.ordinal() ? adaptive : fixed;
+    /**
+     * STANDARD/FULL tier from the live heap (heap after GC / old gen after GC): this server's learned
+     * history, the fixed thresholds, and the pressure tracker's prediction, whichever is strongest.
+     * Raw heap no longer counts here; the tracker already escalates on it near the ceiling (97%).
+     */
+    public MemoryTier resolveTier(double effectiveRatio, MemoryTier predictedTier) {
+        MemoryTier prev = lastTier;
+        MemoryTier learned = samples.size() < MIN_SAMPLES ? tierForFixed(effectiveRatio) : tierForQuantiles(effectiveRatio);
+        MemoryTier fixed = tierForFixed(effectiveRatio);
+        MemoryTier strongest = learned.ordinal() >= fixed.ordinal() ? learned : fixed;
         if (predictedTier != null && predictedTier.ordinal() > strongest.ordinal()) {
             strongest = predictedTier;
-            lastTier = strongest;
         }
-        return strongest;
+        MemoryTier next = strongest;
+        boolean hysteresis = false;
+        if (next.ordinal() < prev.ordinal()) {
+            next = MemoryTier.values()[prev.ordinal() - 1];
+            hysteresis = next != strongest;
+        }
+        lastTier = next;
+        logTierChange(prev, next, effectiveRatio, true, hysteresis);
+        return next;
+    }
+
+    private MemoryTier tierForQuantiles(double ratio) {
+        if (ratio >= q97) {
+            return MemoryTier.CRITICAL;
+        } else if (ratio >= q90) {
+            return MemoryTier.TIGHT;
+        } else if (ratio >= q75) {
+            return MemoryTier.WATCH;
+        }
+        return MemoryTier.COMFORT;
     }
 
     public double q50() {

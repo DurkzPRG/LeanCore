@@ -69,7 +69,7 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             return null;
         }
         if (plugin.isPassiveMode()) {
-            say(ctx, "PASSIVE mode — runtime disabled. Use localHostMode AUTO.", "#FFAA00");
+            say(ctx, "PASSIVE mode: runtime disabled. Use localHostMode AUTO.", "#FFAA00");
             return null;
         }
         if (plugin.runtime() == null) {
@@ -664,9 +664,9 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
                 LeanCoreConfig config = plugin.config();
                 config.probePassedAtMs = System.currentTimeMillis();
                 config.save();
-                say(ctx, "probe PASSED — unload gate open (saved to LeanCore.json)", "#55FF55");
+                say(ctx, "probe PASSED (saved to LeanCore.json)", "#55FF55");
             } else {
-                say(ctx, "probe FAILED — fix failing steps before enabling unload", "#FF8888");
+                say(ctx, "probe FAILED: see the failing steps above", "#FF8888");
             }
             if (plugin.config().motionModelEnabled) {
                 PlayerFeatureState features = rt.classifier().features().snapshot().get(playerRef.getUuid());

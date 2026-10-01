@@ -46,6 +46,12 @@ public class PolicyApplier {
     // Connection-aware engine chunk-rate baseline per player (perSecond, perTick), captured before we
     // first touch it. Targets are a percentage of this, so the player's connection class is honored.
     private final Map<UUID, int[]> chunkBaselineByPlayer = new ConcurrentHashMap<>();
+    /**
+     * Per player: {requested, lastWritten}. The requested radius is what the client asked for; cuts
+     * are always computed from it, never from a radius LeanCore already lowered, so repeated passes
+     * cannot ratchet the view down and COMFORT gives the player's own radius back.
+     */
+    private final Map<UUID, int[]> viewRadiusByPlayer = new ConcurrentHashMap<>();
     private final ThreadLocal<PlayerBatchScratch> playerBatchScratch = ThreadLocal.withInitial(PlayerBatchScratch::new);
 
     public PolicyApplier(LeanCoreConfig config, FalseCutTracker falseCutTracker, ViewRadiusCache viewRadiusCache) {
@@ -87,6 +93,13 @@ public class PolicyApplier {
         }
 
         PlayerBatchScratch scratch = groupPlayers(online, false);
+        Set<UUID> onlineIds = new HashSet<>();
+        for (PlayerRef playerRef : online) {
+            if (playerRef != null) {
+                onlineIds.add(playerRef.getUuid());
+            }
+        }
+        viewRadiusByPlayer.keySet().retainAll(onlineIds);
         int scheduled = 0;
         for (MutablePlayerBatch grouped : scratch.groupedWorlds) {
             World world = Universe.get().getWorld(grouped.worldUuid);
@@ -162,7 +175,8 @@ public class PolicyApplier {
         }
 
         int current = player.getClientViewRadius();
-        int target = targetRadius(player, policy, demand, profile);
+        int requested = requestedRadius(playerId, player);
+        int target = Math.min(requested, resolveTargetClientRadius(config, profile, requested, policy, demand));
 
         // Streaming grace: while this player is actively streaming chunks, don't shrink their view
         // radius (that would tell the client to drop chunks it is loading and re-request them).
@@ -195,16 +209,25 @@ public class PolicyApplier {
             return;
         }
         player.setClientViewRadius(target);
+        noteWrittenRadius(playerId, target);
     }
 
-    private int targetRadius(Player player, GovernorPolicy policy, RetentionDemand demand, RuntimeProfile profile) {
-        return resolveTargetClientRadius(
-                config,
-                profile,
-                player.getViewRadius(),
-                policy,
-                demand
-        );
+    /** The radius the client asked for; refreshed whenever the client changes it behind our back. */
+    private int requestedRadius(UUID playerId, Player player) {
+        int current = player.getClientViewRadius();
+        int[] state = viewRadiusByPlayer.get(playerId);
+        if (state == null || current != state[1]) {
+            state = new int[]{Math.max(1, player.getViewRadius()), current};
+            viewRadiusByPlayer.put(playerId, state);
+        }
+        return state[0];
+    }
+
+    private void noteWrittenRadius(UUID playerId, int radius) {
+        int[] state = viewRadiusByPlayer.get(playerId);
+        if (state != null) {
+            state[1] = radius;
+        }
     }
 
     static int resolveTargetClientRadius(
@@ -215,7 +238,9 @@ public class PolicyApplier {
             RetentionDemand demand
     ) {
         int serverRadius = Math.max(1, serverViewRadius);
-        int scaled = (int) Math.round(serverRadius * policy.viewScale() * demand.viewScale());
+        // Per-player demand only shapes a cut; with no trim (COMFORT) everyone keeps their radius.
+        double demandScale = policy.viewScale() < 1.0D ? Math.min(1.0D, demand.viewScale()) : 1.0D;
+        int scaled = (int) Math.round(serverRadius * policy.viewScale() * demandScale);
         int minClient = profile == RuntimeProfile.LITE
                 ? Math.max(config.minClientViewRadius, config.liteMinClientViewRadius)
                 : config.minClientViewRadius;
@@ -284,6 +309,7 @@ public class PolicyApplier {
         viewRadiusCache.noteMotionApplied(playerId, boosted, boosted - base);
         if (Math.abs(boosted - current) >= minDelta) {
             player.setClientViewRadius(boosted);
+            noteWrittenRadius(playerId, boosted);
         }
     }
 

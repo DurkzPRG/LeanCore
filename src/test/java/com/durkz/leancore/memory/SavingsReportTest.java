@@ -204,8 +204,8 @@ class SavingsReportTest {
                 now + 1000L
         ));
 
-        assertTrue(output.contains("liteUnload=ON"));
-        assertFalse(output.contains("unload=OFF"));
+        assertTrue(output.contains("chunk removal: engine"));
+        assertFalse(output.contains("liteUnload=ON"));
     }
 
     @Test

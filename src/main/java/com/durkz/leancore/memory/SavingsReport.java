@@ -44,7 +44,7 @@ public final class SavingsReport {
 
         lines.add(new Line("--- JVM heap (measured) ---", "#888888"));
         if (session.heapSampleCount() <= 0) {
-            lines.add(new Line("no heap samples yet — wait for runtime tick", "#FF8888"));
+            lines.add(new Line("no heap samples yet, wait for runtime tick", "#FF8888"));
             return lines;
         }
 
@@ -174,23 +174,14 @@ public final class SavingsReport {
                     "policy unload yielded to engine (>=85%% heap): %d ticks",
                     session.engineUnloadYields()), "#FFAA00"));
         }
-        if (liteProfile) {
-            if (config.liteUnloadEnabled) {
-                lines.add(new Line(
-                        "liteUnload=ON — AFK reclaim via lite path (no governEnabled); engine may evict first",
-                        "#888888"));
-            } else {
-                lines.add(new Line("liteUnload=OFF (liteUnloadEnabled=false)", "#888888"));
-            }
-        } else if (!config.unloadEnabled) {
-            lines.add(new Line("unload=OFF — policy unload count may not reduce heap if engine already evicted", "#888888"));
-        }
+        lines.add(new Line("chunk removal: engine (LeanCore holds spare chunks instead, see /leancore status)",
+                "#888888"));
 
         lines.add(new Line("--- GC hint (LITE solo, experimental) ---", "#888888"));
         lines.add(gcHintLine(config, profile, gcHint, nowMs));
 
         lines.add(new Line("--- Notes ---", "#888888"));
-        lines.add(new Line("JVM heap only — not OS/VPS RSS. GC can shift numbers.", "#888888"));
+        lines.add(new Line("JVM heap only, not OS/VPS RSS. GC can shift numbers.", "#888888"));
 
         if (session.bootStabilizing(nowMs)) {
             lines.add(new Line("boot grace (<60s): baseline still stabilizing", "#FFAA00"));
@@ -199,7 +190,7 @@ public final class SavingsReport {
         if ((liteProfile && !config.liteMemoryGovernorEnabled)
                 || (!liteProfile && !governorConfigured)
                 || !session.governorEverActive()) {
-            lines.add(new Line("heap delta is OBSERVED ONLY — not attributed to LeanCore policy", "#FF8888"));
+            lines.add(new Line("heap delta is OBSERVED ONLY, not attributed to LeanCore policy", "#FF8888"));
             if (!liteProfile && !governorConfigured) {
                 lines.add(new Line("set governEnabled=true (and viewRadiusGovernanceEnabled) to apply cuts", "#888888"));
             }
@@ -213,7 +204,7 @@ public final class SavingsReport {
         }
 
         if (governor != null && governor.rolledBack()) {
-            lines.add(new Line("rollback active — last policy change reverted", "#FF8888"));
+            lines.add(new Line("rollback active: last policy change reverted", "#FF8888"));
         }
 
         return lines;

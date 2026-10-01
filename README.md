@@ -53,7 +53,7 @@ The cost: more heap in use during the run (capped at 50% after GC) and about 0.1
      chunks         chunks             + brake loading   + brake harder
 ```
 
-Default thresholds: 70% / 82% / 90% of max heap, measured after GC. Raw heap alone only counts as CRITICAL at 97%. A change needs two readings to confirm, and a cut that makes things worse is rolled back.
+Default thresholds: 70% / 82% / 90% of max heap, measured after GC. Raw heap alone only counts as CRITICAL at 97%. A change needs two readings to confirm. Giving view back is undone if the heap climbs right after; a cut is never undone just because the heap kept rising.
 
 **Chunk retention**
 
@@ -76,7 +76,7 @@ LeanCore never removes chunks itself. Releasing only drops the reference.
 
 ## What it does
 
-- Live-heap tiers: COMFORT / WATCH / TIGHT / CRITICAL from heap after GC, old gen after GC and the growth trend, with rollback
+- Live-heap tiers: COMFORT / WATCH / TIGHT / CRITICAL from heap after GC, old gen after GC and the growth trend, with rollback when giving view back backfires
 - View radius trims (LITE) and simulation (hot) radius trims under real pressure, never below your floor
 - Chunk retention: spare heap keeps recently left chunks loaded
 - Chunk rate brake: slows chunk streaming on TIGHT/CRITICAL (stays off while QuantumHy is loaded)
@@ -138,6 +138,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | `learningEnabled` | `false` | STANDARD/FULL learning |
 | `watchHeapRatio` / `tightHeapRatio` / `criticalHeapRatio` | `0.70` / `0.82` / `0.90` | Tier thresholds, heap after GC |
 | `dedicatedServerMode` | `false` | Force FULL profile |
+| `dedicatedViewRadiusGraceSeconds` | `600` | Dedicated hosts: no view-radius cuts for this long after start |
 | `checkForUpdates` | `true` | Notify ops/admins once per session when a newer JAR is on the mod page |
 
 ### Retention and brake keys (1.8.0)

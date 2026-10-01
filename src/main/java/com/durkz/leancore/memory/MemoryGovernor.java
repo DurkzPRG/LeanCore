@@ -211,6 +211,11 @@ public class MemoryGovernor {
         return viewRadiusGraceUntilMs > 0L && nowMs < viewRadiusGraceUntilMs;
     }
 
+    /** True when {@code active} trims less than {@code previous}, i.e. the last change gave view back. */
+    static boolean relaxed(GovernorPolicy active, GovernorPolicy previous) {
+        return active != null && previous != null && active.viewScale() > previous.viewScale() + 1.0E-9D;
+    }
+
     private void checkRollback(MemorySnapshot sample) {
         if (activePolicy == null || lastChangeMs <= 0L || previousPolicy == null) {
             return;
@@ -219,7 +224,12 @@ public class MemoryGovernor {
         if (elapsedMs > config.rollbackWindowSec * 1000L) {
             return;
         }
-        if (sample.heapUsedRatio() <= heapAtChange + config.rollbackHeapDelta) {
+        if (sample.postGcHeapUsedRatio() <= heapAtChange + config.rollbackHeapDelta) {
+            return;
+        }
+        if (!relaxed(activePolicy, previousPolicy)) {
+            // Heap still rising after a cut means the pressure comes from elsewhere; undoing the cut
+            // would hand the view back exactly when it is needed least.
             return;
         }
 
@@ -231,10 +241,10 @@ public class MemoryGovernor {
         activePolicy = previousPolicy;
         rolledBack = true;
         lastChangeMs = System.currentTimeMillis();
-        heapAtChange = sample.heapUsedRatio();
+        heapAtChange = sample.postGcHeapUsedRatio();
         DiagnosticLog.info(String.format(Locale.ROOT,
-                "rollback %s -> %s why=heap %.0f%% rose past %.0f%% within %ds (blacklisted 15m)",
-                failed.key(), previousPolicy.key(), sample.heapUsedRatio() * 100.0D,
+                "rollback %s -> %s why=post-GC heap %.0f%% rose past %.0f%% within %ds (blacklisted 15m)",
+                failed.key(), previousPolicy.key(), sample.postGcHeapUsedRatio() * 100.0D,
                 triggerRatio * 100.0D, config.rollbackWindowSec));
     }
 
@@ -247,6 +257,11 @@ public class MemoryGovernor {
             return;
         }
         if (sample.postGcHeapUsedRatio() <= heapAtChange + config.rollbackHeapDelta) {
+            return;
+        }
+        if (!relaxed(activePolicy, previousPolicy)) {
+            // Heap still rising after a cut means the pressure comes from elsewhere; undoing the cut
+            // would hand the view back exactly when it is needed least.
             return;
         }
 
@@ -362,7 +377,7 @@ public class MemoryGovernor {
         previousPolicy = activePolicy;
         activePolicy = toApply;
         lastChangeMs = nowMs;
-        heapAtChange = sample.heapUsedRatio();
+        heapAtChange = sample.postGcHeapUsedRatio();
         rolledBack = false;
 
         long elapsedSec = previousPolicy == null ? config.policyChangeMinIntervalSec : 0L;

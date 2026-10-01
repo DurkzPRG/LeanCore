@@ -8,12 +8,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ServerContextTrackerTest {
 
     @Test
-    void hardCriticalThresholdOverridesLearnedContext() {
+    void liveHeapAtCriticalOverridesLearnedContext() {
         LeanCoreConfig config = new LeanCoreConfig();
         ServerContextTracker tracker = new ServerContextTracker(config);
 
-        MemoryTier tier = tracker.resolveTier(0.50D, config.criticalHeapRatio, MemoryTier.COMFORT);
+        assertEquals(MemoryTier.CRITICAL, tracker.resolveTier(config.criticalHeapRatio, MemoryTier.COMFORT));
+    }
 
-        assertEquals(MemoryTier.CRITICAL, tier);
+    @Test
+    void lowLiveHeapStaysComfortWhateverTheRawHeapDid() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        ServerContextTracker tracker = new ServerContextTracker(config);
+
+        assertEquals(MemoryTier.COMFORT, tracker.resolveTier(0.40D, MemoryTier.COMFORT));
+        assertEquals(MemoryTier.TIGHT, tracker.resolveTier(0.40D, MemoryTier.TIGHT));
     }
 }

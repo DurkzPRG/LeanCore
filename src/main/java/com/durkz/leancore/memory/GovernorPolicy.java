@@ -19,7 +19,9 @@ public record GovernorPolicy(
             case TIGHT -> 3;
             case CRITICAL -> 6;
         };
-        return new GovernorPolicy(preset, tier, preset.viewScale() * tierScale, demoteBatch);
+        // COMFORT never trims: presets only shape how hard WATCH and above cut.
+        double viewScale = tier == MemoryTier.COMFORT ? 1.0D : preset.viewScale() * tierScale;
+        return new GovernorPolicy(preset, tier, viewScale, demoteBatch);
     }
 
     public String key() {
