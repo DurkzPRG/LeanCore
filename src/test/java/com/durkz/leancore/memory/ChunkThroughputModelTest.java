@@ -113,4 +113,23 @@ class ChunkThroughputModelTest {
         config.chunkThroughputDrainBoostEnabled = false;
         assertEquals(135, ChunkThroughputModel.effectivePercent(config, MemoryTier.COMFORT, 999));
     }
+
+    @Test
+    void brakeOnlyLowersUnderPressureAndUsesAbsoluteCaps() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        assertEquals(2560, ChunkThroughputModel.brakePerSecond(config, MemoryTier.COMFORT, 2560));
+        assertEquals(2560, ChunkThroughputModel.brakePerSecond(config, MemoryTier.WATCH, 2560));
+        assertEquals(512, ChunkThroughputModel.brakePerSecond(config, MemoryTier.TIGHT, 2560));
+        assertEquals(192, ChunkThroughputModel.brakePerSecond(config, MemoryTier.CRITICAL, 2560));
+        // A remote baseline already below the cap is left alone.
+        assertEquals(360, ChunkThroughputModel.brakePerSecond(config, MemoryTier.TIGHT, 360));
+    }
+
+    @Test
+    void brakePerTickScalesWithThePerSecondCut() {
+        assertEquals(40, ChunkThroughputModel.brakePerTick(40, 2560, 2560));
+        assertEquals(8, ChunkThroughputModel.brakePerTick(40, 2560, 512));
+        assertEquals(3, ChunkThroughputModel.brakePerTick(40, 2560, 192));
+        assertEquals(1, ChunkThroughputModel.brakePerTick(1, 2560, 8));
+    }
 }

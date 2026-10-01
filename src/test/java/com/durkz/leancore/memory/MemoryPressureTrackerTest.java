@@ -109,4 +109,22 @@ class MemoryPressureTrackerTest {
         assertEquals(MemoryTier.COMFORT, pressure.predictedTier());
         assertEquals((long) (GB * 0.40D), pressure.postGcHeapUsed());
     }
+
+    @Test
+    void rawHeapSwingWithLowLiveSetIsNotCritical() {
+        LeanCoreConfig config = new LeanCoreConfig();
+        MemoryPressureTracker tracker = new MemoryPressureTracker();
+
+        MemoryPressureTracker.Pressure pressure = null;
+        for (int i = 1; i <= 6; i++) {
+            pressure = tracker.observe(i * 5_000_000_000L, (long) (GB * 0.93D), GB,
+                    (long) (GB * 0.30D), GB, i * 100L, i, i * 10L, (long) (GB * 0.40D), config);
+        }
+        assertEquals(MemoryTier.COMFORT, pressure.predictedTier());
+
+        MemoryPressureTracker.Pressure nearOom = tracker.observe(40_000_000_000L, (long) (GB * 0.98D), GB,
+                (long) (GB * 0.30D), GB, 800L, 7L, 70L, (long) (GB * 0.40D), config);
+        assertEquals(MemoryTier.CRITICAL, nearOom.predictedTier());
+        assertEquals("heap-critical", nearOom.reason());
+    }
 }

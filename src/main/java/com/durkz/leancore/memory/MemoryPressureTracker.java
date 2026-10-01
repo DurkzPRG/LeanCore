@@ -12,6 +12,11 @@ final class MemoryPressureTracker {
     private static final int MIN_POST_GC_SAMPLES_FOR_PREDICTION = 3;
     private static final double PREDICT_TIGHT_SECONDS = 30.0D;
     private static final double PREDICT_WATCH_SECONDS = 60.0D;
+    /**
+     * Raw heap alone only means CRITICAL this close to the ceiling. G1 lets the raw heap swing to
+     * 85-95% between young collections with a low live set; that is garbage, not pressure.
+     */
+    private static final double RAW_HEAP_HARD_CRITICAL = 0.97D;
 
     private long lastSampleNanos;
     private long lastAllocatedBytes;
@@ -93,9 +98,12 @@ final class MemoryPressureTracker {
         double effectiveRatio = Math.max(oldGenRatio, postGcRatio);
         MemoryTier desired = MemoryTier.COMFORT;
         String reason = "heap";
-        if (heapRatio >= config.criticalHeapRatio || oldGenRatio >= config.criticalHeapRatio) {
+        boolean hardCritical = heapRatio >= RAW_HEAP_HARD_CRITICAL
+                || oldGenRatio >= config.criticalHeapRatio || postGcRatio >= config.criticalHeapRatio;
+        if (hardCritical) {
             desired = MemoryTier.CRITICAL;
-            reason = oldGenRatio > heapRatio ? "old-gen-critical" : "heap-critical";
+            reason = heapRatio >= RAW_HEAP_HARD_CRITICAL ? "heap-critical"
+                    : oldGenRatio >= postGcRatio ? "old-gen-critical" : "post-gc-critical";
         } else if (oldGenRatio >= config.tightHeapRatio || postGcRatio >= config.tightHeapRatio) {
             desired = MemoryTier.TIGHT;
             reason = oldGenRatio > postGcRatio ? "old-gen-tight" : "post-gc-tight";
@@ -112,9 +120,7 @@ final class MemoryPressureTracker {
                     : oldGenRatio > postGcRatio ? "old-gen" : "post-gc";
         }
 
-        MemoryTier predicted = confirm(desired, reason,
-                desired == MemoryTier.CRITICAL && (heapRatio >= config.criticalHeapRatio
-                        || oldGenRatio >= config.criticalHeapRatio));
+        MemoryTier predicted = confirm(desired, reason, hardCritical);
         return new Pressure(effectiveRatio, postGcHeapUsed, allocationRate, gcPauseRatio,
                 heapSlopePerSecond, secondsToTight, predicted, stableReason);
     }

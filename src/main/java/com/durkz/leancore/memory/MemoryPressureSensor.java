@@ -27,6 +27,7 @@ public class MemoryPressureSensor {
     private final Map<String, Long> lastCollectorCounts = new HashMap<>();
     private Set<String> heapPoolNames;
     private long lastPostGcHeapUsed = -1L;
+    private long lastPostGcOldGenUsed = -1L;
     private volatile PredictedPositionSource positions;
 
     public MemoryPressureSensor(ServerContextTracker serverContext) {
@@ -61,11 +62,17 @@ public class MemoryPressureSensor {
         long used = rt.totalMemory() - rt.freeMemory();
         long max = rt.maxMemory();
         double ratio = max <= 0L ? 0.0D : (double) used / max;
+        long postGcHeap = postGcHeapUsed();
         long[] oldGen = oldGenerationUsage();
+        if (lastPostGcOldGenUsed >= 0L) {
+            // A live old-gen read includes dead humongous chunk data the next GC frees at once;
+            // the after-GC value is the one that reflects what actually stays.
+            oldGen[0] = lastPostGcOldGenUsed;
+        }
         long[] gc = gcTotals();
         MemoryPressureTracker.Pressure pressure = pressureTracker.observe(
                 System.nanoTime(), used, max, oldGen[0], oldGen[1], totalAllocatedBytes(),
-                gc[0], gc[1], postGcHeapUsed(), config);
+                gc[0], gc[1], postGcHeap, config);
 
         long nowMs = System.currentTimeMillis();
         if (sessionSavings != null) {
@@ -134,13 +141,20 @@ public class MemoryPressureSensor {
                 continue;
             }
             long heapAfter = 0L;
+            long oldAfter = 0L;
             for (Map.Entry<String, MemoryUsage> pool : info.getMemoryUsageAfterGc().entrySet()) {
                 if (heapPoolNames.contains(pool.getKey())) {
-                    heapAfter += Math.max(0L, pool.getValue().getUsed());
+                    long poolUsed = Math.max(0L, pool.getValue().getUsed());
+                    heapAfter += poolUsed;
+                    String name = pool.getKey().toLowerCase(java.util.Locale.ROOT);
+                    if (name.contains("old") || name.contains("tenured")) {
+                        oldAfter += poolUsed;
+                    }
                 }
             }
             latestEnd = info.getEndTime();
             lastPostGcHeapUsed = heapAfter;
+            lastPostGcOldGenUsed = oldAfter;
         }
         return lastPostGcHeapUsed;
     }

@@ -23,6 +23,7 @@ import com.durkz.leancore.memory.MemorySnapshot;
 import com.durkz.leancore.memory.SessionSavingsTracker;
 import com.durkz.leancore.memory.PolicyApplier;
 import com.durkz.leancore.memory.PolicyActionLedger;
+import com.durkz.leancore.dormancy.ChunkRetention;
 import com.durkz.leancore.memory.RetentionAllocator;
 import com.durkz.leancore.session.SessionMode;
 import com.durkz.leancore.session.SessionModeDetector;
@@ -33,11 +34,13 @@ import com.durkz.leancore.ui.HudSessionStore;
 import com.durkz.leancore.ui.MemoryHudService;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.modules.entity.player.ChunkTracker;
 import com.hypixel.hytale.server.core.universe.world.World;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -91,6 +94,8 @@ public class MemoryRuntime {
     private ScheduledFuture<?> persistFuture;
     private ScheduledFuture<?> motionFuture;
     private ScheduledFuture<?> pressureFuture;
+    private ScheduledFuture<?> retentionFuture;
+    private volatile ChunkRetention chunkRetention;
     private long lastDormancyRefreshMs;
     private long lastLiteHeapSampleMs;
     private double lastLiteX;
@@ -193,6 +198,7 @@ public class MemoryRuntime {
         schedulePersistIfNeeded();
         scheduleMotionTickIfNeeded();
         schedulePressureSampling();
+        scheduleRetentionUpdates();
         if (config.dedicatedServerMode && config.viewRadiusGovernanceEnabled) {
             governor.setViewRadiusGraceUntilMs(System.currentTimeMillis() + DedicatedBootstrap.VIEW_RADIUS_GRACE_MS);
         }
@@ -300,6 +306,11 @@ public class MemoryRuntime {
             pressureFuture.cancel(true);
             pressureFuture = null;
         }
+        if (retentionFuture != null) {
+            retentionFuture.cancel(true);
+            retentionFuture = null;
+        }
+        releaseRetention();
         stopScheduler();
         persistLearning();
         logShutdownDiagnostics();
@@ -766,6 +777,85 @@ public class MemoryRuntime {
     }
 
     private record WorldBatch(UUID worldUuid, World world, List<PlayerRef> players) {
+    }
+
+    public void setChunkRetention(ChunkRetention retention) {
+        this.chunkRetention = retention;
+    }
+
+    public ChunkRetention chunkRetention() {
+        return chunkRetention;
+    }
+
+    private void scheduleRetentionUpdates() {
+        if (!running || scheduler == null) {
+            return;
+        }
+        retentionFuture = scheduler.scheduleAtFixedRate(this::updateRetention, 5L, 2L, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Every 2s: refresh the retention budget from the latest sample, then let each world with players
+     * (or with held chunks) pick up and release keep-loaded references on its own thread.
+     */
+    private void updateRetention() {
+        ChunkRetention retention = chunkRetention;
+        if (retention == null || !running) {
+            return;
+        }
+        try {
+            retention.updateBudget(lastSample);
+            Map<UUID, List<double[]>> byWorld = new HashMap<>();
+            for (PlayerRef ref : Universe.get().getPlayers()) {
+                if (ref == null || !ref.isValid() || ref.getWorldUuid() == null) {
+                    continue;
+                }
+                List<double[]> positions = byWorld.computeIfAbsent(ref.getWorldUuid(), ignored -> new ArrayList<>());
+                double[] xz = classifier.features().currentXZ(ref.getUuid());
+                if (xz != null) {
+                    positions.add(xz);
+                }
+            }
+            Set<UUID> worlds = new HashSet<>(byWorld.keySet());
+            worlds.addAll(retention.worldsHolding());
+            long nowMs = System.currentTimeMillis();
+            for (UUID worldUuid : worlds) {
+                World world = Universe.get().getWorld(worldUuid);
+                if (world == null) {
+                    continue;
+                }
+                double[] players = ChunkRetention.flatten(byWorld.getOrDefault(worldUuid, List.of()));
+                WorldDispatch.run(world, () -> retention.scanWorld(world, chunkTrackers(worldUuid), players, nowMs));
+            }
+            DiagnosticLog.infoOnChange("chunk-retention", String.format(Locale.ROOT,
+                    "chunk retention held~%d budget~%d", retention.heldCount() / 50 * 50, retention.budget() / 50 * 50));
+        } catch (RuntimeException e) {
+            plugin.getLogger().atWarning().withCause(e).log("chunk retention update failed");
+        }
+    }
+
+    /** World thread: the chunk trackers of the players in this world. */
+    private static List<ChunkTracker> chunkTrackers(UUID worldUuid) {
+        List<ChunkTracker> trackers = new ArrayList<>();
+        for (PlayerRef ref : Universe.get().getPlayers()) {
+            if (ref != null && ref.isValid() && worldUuid.equals(ref.getWorldUuid()) && ref.getChunkTracker() != null) {
+                trackers.add(ref.getChunkTracker());
+            }
+        }
+        return trackers;
+    }
+
+    private void releaseRetention() {
+        ChunkRetention retention = chunkRetention;
+        if (retention == null) {
+            return;
+        }
+        for (UUID worldUuid : retention.worldsHolding()) {
+            World world = Universe.get().getWorld(worldUuid);
+            if (world != null) {
+                WorldDispatch.run(world, () -> retention.releaseWorld(world));
+            }
+        }
     }
 
     private void schedulePressureSampling() {

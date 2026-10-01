@@ -196,6 +196,14 @@ public class LeanCoreConfig {
     public boolean chunkThroughputDrainBoostEnabled = true;
     public int chunkThroughputDrainBoostPct = 200;
 
+    // Chunk rate brake: used when chunkThroughputGovernanceEnabled is off. Only slows chunk streaming,
+    // and only under real (post-GC) pressure: TIGHT and CRITICAL cap each player's send rate at these
+    // absolute values, COMFORT/WATCH give the engine's own rate back. Skipped while QuantumHy is loaded,
+    // since QuantumHy owns the send rate there.
+    public boolean chunkRateBrakeEnabled = true;
+    public int chunkRateBrakeTightPerSecond = 512;
+    public int chunkRateBrakeCriticalPerSecond = 192;
+
     // Revisit keep-guard (anti-reload): never pick a zone for unload while its revisit likelihood is
     // at or above this score, so zones the player almost certainly returns to soon (a base, a hub)
     // are not unloaded and re-streamed. CRITICAL pressure overrides the guard. Needs the zone reuse
@@ -210,6 +218,21 @@ public class LeanCoreConfig {
     public boolean chunkPrefetchEnabled = false;
     public int chunkPrefetchMaxPerTick = 4;
     public long chunkPrefetchHorizonMs = 3000L;
+
+    // Chunk retention: the engine unloads a chunk 7.5s after no player tracks it, even with plenty of
+    // free heap, so walking back reloads it from disk. LeanCore keeps such chunks loaded (engine
+    // keep-loaded reference) while the post-GC heap stays under chunkRetentionMaxPostGcRatio, holding at
+    // most what fits there. The ceiling leaves room for exploration bursts, which can add a third of the
+    // heap in seconds, and new holds are rate-limited (64 per 2s scan) so the post-GC reading keeps up. Any tier above COMFORT
+    // releases everything on the next scan (2s). Held chunks stop ticking. Nothing is removed by
+    // LeanCore; releasing only drops the reference.
+    public boolean chunkRetentionEnabled = true;
+    public double chunkRetentionMaxPostGcRatio = 0.50D;
+    public double chunkRetentionMbPerChunk = 1.0D;
+    public int chunkRetentionMaxChunks = 2048;
+    public int chunkRetentionMaxHoldSeconds = 600;
+    /** Near the budget, only chunks this close to a player stay held. */
+    public int chunkRetentionRingBlocks = 384;
 
     // Always-on diagnostic logging to the server log (lifecycle, command mirroring, decision
     // reasoning). Enabled by default; set false to silence all [diag] lines.
@@ -517,6 +540,14 @@ public class LeanCoreConfig {
         if (liteUnloadMaxChunksPerSweep > 64) {
             liteUnloadMaxChunksPerSweep = 64;
         }
+        // Retention must stop before the WATCH tier, or holding chunks would itself trigger cuts.
+        chunkRetentionMaxPostGcRatio = Math.max(0.20D, Math.min(watchHeapRatio - 0.05D, chunkRetentionMaxPostGcRatio));
+        chunkRetentionMbPerChunk = Math.max(0.10D, Math.min(16.0D, chunkRetentionMbPerChunk));
+        chunkRetentionMaxChunks = Math.max(0, Math.min(16_384, chunkRetentionMaxChunks));
+        chunkRetentionMaxHoldSeconds = Math.max(30, Math.min(3600, chunkRetentionMaxHoldSeconds));
+        chunkRetentionRingBlocks = Math.max(64, Math.min(4096, chunkRetentionRingBlocks));
+        chunkRateBrakeTightPerSecond = Math.max(8, Math.min(2560, chunkRateBrakeTightPerSecond));
+        chunkRateBrakeCriticalPerSecond = Math.max(8, Math.min(chunkRateBrakeTightPerSecond, chunkRateBrakeCriticalPerSecond));
     }
 
     private static double clampRatio(double value, double fallback) {

@@ -423,6 +423,56 @@ public class PolicyApplier {
         }
     }
 
+    /**
+     * Pressure brake on each player's chunk send-rate: TIGHT/CRITICAL cap it, COMFORT/WATCH restore
+     * the engine baseline captured before the first change. Never raises the rate above the engine's
+     * own value. Callers skip it when QuantumHy owns the send rate or throughput governance is on.
+     */
+    public void applyChunkRateBrake(MemoryTier tier, Collection<PlayerRef> online) {
+        if (tier == null || online == null || !RuntimeGuard.active() || !config.chunkRateBrakeEnabled) {
+            return;
+        }
+        PlayerBatchScratch scratch = groupPlayers(online, true);
+        chunkBaselineByPlayer.keySet().retainAll(scratch.onlineIds);
+        for (MutablePlayerBatch grouped : scratch.groupedWorlds) {
+            World world = Universe.get().getWorld(grouped.worldUuid);
+            if (world == null || !world.isAlive() || !RuntimeGuard.active()) {
+                continue;
+            }
+            List<PlayerRef> batch = List.copyOf(grouped.players);
+            WorldDispatch.run(world, () -> {
+                if (!RuntimeGuard.active()) {
+                    return;
+                }
+                for (PlayerRef playerRef : batch) {
+                    applyChunkRateBrakeOne(playerRef, tier);
+                }
+            });
+        }
+    }
+
+    private void applyChunkRateBrakeOne(PlayerRef playerRef, MemoryTier tier) {
+        if (playerRef == null || !playerRef.isValid()) {
+            return;
+        }
+        ChunkTracker tracker = playerRef.getChunkTracker();
+        if (tracker == null) {
+            return;
+        }
+        int[] baseline = chunkBaselineByPlayer.computeIfAbsent(playerRef.getUuid(),
+                ignored -> new int[]{tracker.getMaxSectionsPerSecond(), tracker.getMaxSectionsPerTick()});
+        int targetSec = ChunkThroughputModel.brakePerSecond(config, tier, baseline[0]);
+        int targetTick = ChunkThroughputModel.brakePerTick(baseline[1], baseline[0], targetSec);
+        if (tracker.getMaxSectionsPerSecond() != targetSec) {
+            tracker.setMaxSectionsPerSecond(targetSec);
+            DiagnosticLog.infoOnChange("chunk-rate-brake", String.format(Locale.ROOT,
+                    "chunk rate brake tier=%s sections/s=%d (engine %d)", tier, targetSec, baseline[0]));
+        }
+        if (tracker.getMaxSectionsPerTick() != targetTick) {
+            tracker.setMaxSectionsPerTick(targetTick);
+        }
+    }
+
     /** Motion boost is upward only and capped at maxClientViewRadius. */
     static int applyMotionBoost(int target, double motionScale, int maxClientViewRadius) {
         if (motionScale <= 1.0D) {

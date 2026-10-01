@@ -71,4 +71,26 @@ public final class ChunkThroughputModel {
                 baselinePerTick * (effectivePercent(config, tier, loadingBacklog) / 100.0D));
         return Math.min(MAX_SECTIONS_PER_TICK, Math.max(1, scaled));
     }
+
+    /**
+     * Pressure brake, used when chunk throughput governance is off. Only ever lowers the engine
+     * baseline: TIGHT and CRITICAL cap it at an absolute rate (a percentage of the local 2560/s would
+     * not slow anything), COMFORT and WATCH give the baseline back.
+     */
+    public static int brakePerSecond(LeanCoreConfig config, MemoryTier tier, int baselinePerSecond) {
+        int cap = switch (tier) {
+            case TIGHT -> config.chunkRateBrakeTightPerSecond;
+            case CRITICAL -> config.chunkRateBrakeCriticalPerSecond;
+            default -> Integer.MAX_VALUE;
+        };
+        return Math.max(MIN_CHUNKS_PER_SECOND, Math.min(baselinePerSecond, cap));
+    }
+
+    /** Per-tick limit scaled by the same factor as {@link #brakePerSecond}. */
+    public static int brakePerTick(int baselinePerTick, int baselinePerSecond, int brakedPerSecond) {
+        if (baselinePerSecond <= 0 || brakedPerSecond >= baselinePerSecond) {
+            return baselinePerTick;
+        }
+        return Math.max(1, (int) Math.round(baselinePerTick * (brakedPerSecond / (double) baselinePerSecond)));
+    }
 }

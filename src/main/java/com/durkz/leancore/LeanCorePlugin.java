@@ -3,6 +3,7 @@ package com.durkz.leancore;
 import com.durkz.leancore.command.LeanCoreCommand;
 import com.durkz.leancore.config.DedicatedBootstrap;
 import com.durkz.leancore.config.LeanCoreConfig;
+import com.durkz.leancore.dormancy.ChunkRetention;
 import com.durkz.leancore.intelligence.BehaviorClassifier;
 import com.durkz.leancore.intelligence.BehaviorSignalSystems;
 import com.durkz.leancore.intelligence.CombatSignalSystems;
@@ -119,6 +120,7 @@ public class LeanCorePlugin extends JavaPlugin {
         BehaviorSignalSystems.register(getEntityStoreRegistry(), classifier);
         CombatSignalSystems.register(getEntityStoreRegistry(), classifier);
         runtime = MemoryRuntime.create(this, config, classifier, learning);
+        runtime.setChunkRetention(new ChunkRetention(config));
 
         getLogger().atInfo().log(
                 "LeanCore %s setup (localHostMode=%s).",

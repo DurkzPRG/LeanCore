@@ -2,6 +2,7 @@ package com.durkz.leancore.memory;
 
 import com.durkz.leancore.config.LeanCoreConfig;
 import com.durkz.leancore.diagnostics.DiagnosticLog;
+import com.durkz.leancore.runtime.QuantumHyPresence;
 import com.durkz.leancore.runtime.RuntimeGuard;
 import com.durkz.leancore.runtime.RuntimeProfile;
 import com.durkz.leancore.dormancy.ZoneChunkUnloader;
@@ -106,6 +107,8 @@ public class MemoryGovernor {
             }
             if (config.chunkThroughputGovernanceEnabled) {
                 applier.applyChunkThroughput(sample.tier(), Universe.get().getPlayers());
+            } else if (config.chunkRateBrakeEnabled && !QuantumHyPresence.present()) {
+                applier.applyChunkRateBrake(sample.tier(), Universe.get().getPlayers());
             }
         }
 
@@ -168,6 +171,8 @@ public class MemoryGovernor {
             }
             if (config.chunkThroughputGovernanceEnabled) {
                 applier.applyChunkThroughput(sample.tier(), Universe.get().getPlayers());
+            } else if (config.chunkRateBrakeEnabled && !QuantumHyPresence.present()) {
+                applier.applyChunkRateBrake(sample.tier(), Universe.get().getPlayers());
             }
         }
 
@@ -241,7 +246,7 @@ public class MemoryGovernor {
         if (elapsedMs > config.rollbackWindowSec * 1000L) {
             return;
         }
-        if (sample.heapUsedRatio() <= heapAtChange + config.rollbackHeapDelta) {
+        if (sample.postGcHeapUsedRatio() <= heapAtChange + config.rollbackHeapDelta) {
             return;
         }
 
@@ -250,10 +255,10 @@ public class MemoryGovernor {
         activePolicy = previousPolicy;
         rolledBack = true;
         lastChangeMs = System.currentTimeMillis();
-        heapAtChange = sample.heapUsedRatio();
+        heapAtChange = sample.postGcHeapUsedRatio();
         DiagnosticLog.info(String.format(Locale.ROOT,
-                "lite rollback %s -> %s why=heap %.0f%% rose past %.0f%% within %ds",
-                failed.key(), previousPolicy.key(), sample.heapUsedRatio() * 100.0D,
+                "lite rollback %s -> %s why=post-GC heap %.0f%% rose past %.0f%% within %ds",
+                failed.key(), previousPolicy.key(), sample.postGcHeapUsedRatio() * 100.0D,
                 triggerRatio * 100.0D, config.rollbackWindowSec));
     }
 
@@ -313,7 +318,7 @@ public class MemoryGovernor {
         previousPolicy = activePolicy;
         activePolicy = toApply;
         lastChangeMs = nowMs;
-        heapAtChange = sample.heapUsedRatio();
+        heapAtChange = sample.postGcHeapUsedRatio();
         rolledBack = false;
     }
 

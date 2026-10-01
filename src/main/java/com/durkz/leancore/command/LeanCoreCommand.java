@@ -149,7 +149,9 @@ public class LeanCoreCommand extends AbstractAsyncCommand {
             say(ctx, rt.learningStore().windowLine(), "#888888");
             say(ctx, rt.learningStore().serverLine(), "#888888");
             say(ctx, rt.actionLedger().statusLine(), "#888888");
-            say(ctx, "unload revisitPenalty=" + rt.zoneChunkUnloader().revisitPenalty(), "#888888");
+            if (rt.chunkRetention() != null) {
+                say(ctx, rt.chunkRetention().statusLine(), "#888888");
+            }
             LeanCoreConfig config = plugin.config();
             long nowMs = System.currentTimeMillis();
             say(ctx, String.format(Locale.ROOT,
