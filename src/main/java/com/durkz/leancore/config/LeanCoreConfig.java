@@ -225,7 +225,8 @@ public class LeanCoreConfig {
     // free heap, so walking back reloads it from disk. LeanCore keeps such chunks loaded (engine
     // keep-loaded reference) while the post-GC heap stays under chunkRetentionMaxPostGcRatio, holding at
     // most what fits there. The ceiling leaves room for exploration bursts, which can add a third of the
-    // heap in seconds, and new holds are rate-limited (64 per 2s scan) so the post-GC reading keeps up. Any tier above COMFORT
+    // heap in seconds, and new holds are rate-limited (64 per 2s scan) so the post-GC reading keeps up. New holds
+    // stop 5% under the ceiling; over it, the farthest go first, 64 per scan. Any tier above COMFORT
     // releases everything on the next scan (2s). Held chunks stop ticking. Nothing is removed by
     // LeanCore; releasing only drops the reference.
     public boolean chunkRetentionEnabled = true;

@@ -47,6 +47,13 @@ public final class ChunkRetention {
      * budget at once would overshoot before the budget can shrink.
      */
     static final int MAX_NEW_HOLDS_PER_SCAN = 64;
+    /**
+     * Releases per world scan while the tier is still COMFORT. A post-GC rise during exploration used
+     * to zero the budget and drop a whole trail in one scan, right before the walk back needed it.
+     */
+    static final int MAX_RELEASES_PER_SCAN = 64;
+    /** New holds stop this far under the post-GC ceiling, so a full budget does not flap at the edge. */
+    static final double HOLD_MARGIN_RATIO = 0.05D;
 
     private final LeanCoreConfig config;
     /** Per world; each map is only touched on its own world thread. */
@@ -57,6 +64,9 @@ public final class ChunkRetention {
     private final LongAdder released = new LongAdder();
 
     private volatile int budget;
+    private volatile int holdBudget;
+    /** Tier above COMFORT or retention off: drop everything on the next scan. */
+    private volatile boolean releaseAll = true;
 
     public ChunkRetention(LeanCoreConfig config) {
         this.config = config;
@@ -64,10 +74,17 @@ public final class ChunkRetention {
 
     /** Runtime thread. */
     public void updateBudget(MemorySnapshot sample) {
-        budget = config.enabled && config.chunkRetentionEnabled
-                ? budgetFor(sample, heldCount.get(), config.chunkRetentionMaxPostGcRatio,
+        boolean on = config.enabled && config.chunkRetentionEnabled;
+        int heldNow = heldCount.get();
+        budget = on
+                ? budgetFor(sample, heldNow, config.chunkRetentionMaxPostGcRatio,
                         config.chunkRetentionMbPerChunk, config.chunkRetentionMaxChunks)
                 : 0;
+        holdBudget = on
+                ? budgetFor(sample, heldNow, config.chunkRetentionMaxPostGcRatio - HOLD_MARGIN_RATIO,
+                        config.chunkRetentionMbPerChunk, config.chunkRetentionMaxChunks)
+                : 0;
+        releaseAll = !on || sample == null || sample.tier() != MemoryTier.COMFORT;
     }
 
     /** Worlds that currently hold chunks, so they get scanned (and released) even with no players. */
@@ -87,7 +104,8 @@ public final class ChunkRetention {
         ChunkStore chunkStore = world.getChunkStore();
         long maxHoldMs = Math.max(0, config.chunkRetentionMaxHoldSeconds) * 1000L;
         int maxDistance = config.chunkRetentionMaxDistanceBlocks;
-        int currentBudget = players.length == 0 ? 0 : budget;
+        boolean dropAll = players.length == 0 || releaseAll;
+        int currentBudget = dropAll ? 0 : budget;
 
         Iterator<Map.Entry<Long, Held>> it = mine.entrySet().iterator();
         while (it.hasNext()) {
@@ -108,7 +126,7 @@ public final class ChunkRetention {
                 returned.increment();
                 continue;
             }
-            if (currentBudget <= 0 || !keeps(nowMs - h.sinceMs, maxHoldMs, distanceOf(players, index), maxDistance)) {
+            if (dropAll || !keeps(nowMs - h.sinceMs, maxHoldMs, distanceOf(players, index), maxDistance)) {
                 h.chunk.removeKeepLoaded();
                 it.remove();
                 heldCount.decrementAndGet();
@@ -116,8 +134,8 @@ public final class ChunkRetention {
             }
         }
 
-        // Over budget: let the farthest go first.
-        int excess = mine.size() - currentBudget;
+        // Over budget: let the farthest go first, a few per scan.
+        int excess = releasesThisScan(mine.size(), currentBudget);
         if (excess > 0) {
             List<Candidate> byDistance = new ArrayList<>(mine.size());
             for (long index : mine.keySet()) {
@@ -134,7 +152,7 @@ public final class ChunkRetention {
 
         // Room left: take the chunks nearest to a player first; the trail of someone who left the
         // area is the least likely to be walked back into.
-        int room = Math.min(currentBudget - heldCount.get(), MAX_NEW_HOLDS_PER_SCAN);
+        int room = dropAll ? 0 : Math.min(holdBudget - heldCount.get(), MAX_NEW_HOLDS_PER_SCAN);
         if (room > 0) {
             List<Candidate> candidates = new ArrayList<>();
             LongIterator indexes = chunkStore.getChunkIndexes().iterator();
@@ -183,6 +201,11 @@ public final class ChunkRetention {
         }
     }
 
+    /** Chunks to release this scan when over budget: farthest first, at most {@link #MAX_RELEASES_PER_SCAN}. */
+    static int releasesThisScan(int heldInWorld, int keepBudget) {
+        return Math.max(0, Math.min(heldInWorld - keepBudget, MAX_RELEASES_PER_SCAN));
+    }
+
     /** Pure keep rule for a chunk already held: not too old and still within reach of a player. */
     static boolean keeps(long heldForMs, long maxHoldMs, double distanceBlocks, int maxDistanceBlocks) {
         return heldForMs < maxHoldMs && distanceBlocks <= maxDistanceBlocks;
@@ -200,7 +223,7 @@ public final class ChunkRetention {
 
     /**
      * Chunk budget for the current heap: what is held now plus what fits under the post-GC ceiling.
-     * Zero unless the tier is COMFORT, so any pressure releases everything on the next scan.
+     * Zero unless the tier is COMFORT; any pressure tier also releases everything on the next scan.
      */
     static int budgetFor(MemorySnapshot sample, int heldNow, double maxPostGcRatio, double mbPerChunk, int maxChunks) {
         if (sample == null || sample.tier() != MemoryTier.COMFORT

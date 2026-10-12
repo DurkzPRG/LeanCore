@@ -46,6 +46,22 @@ class ChunkRetentionTest {
     }
 
     @Test
+    void overBudgetReleasesAFewPerScanInsteadOfTheWholeTrail() {
+        // Budget collapsed to 0 while still COMFORT: 800 held drain over scans, not in one go.
+        assertEquals(ChunkRetention.MAX_RELEASES_PER_SCAN, ChunkRetention.releasesThisScan(800, 0));
+        assertEquals(10, ChunkRetention.releasesThisScan(510, 500));
+        assertEquals(0, ChunkRetention.releasesThisScan(300, 500));
+    }
+
+    @Test
+    void newHoldsStopUnderTheCeilingSoTheBudgetDoesNotFlap() {
+        // 1000 MB max, 480 MB live: 20 MB of room under the 50% ceiling, none under the hold line (45%).
+        MemorySnapshot sample = snapshot(MemoryTier.COMFORT, 1000L * MB, 480L * MB);
+        assertEquals(20, ChunkRetention.budgetFor(sample, 0, 0.50D, 1.0D, 2048));
+        assertEquals(0, ChunkRetention.budgetFor(sample, 0, 0.50D - ChunkRetention.HOLD_MARGIN_RATIO, 1.0D, 2048));
+    }
+
+    @Test
     void distanceUsesThirtyTwoBlockChunks() {
         double[] player = {16.0D, 16.0D};
         assertEquals(0.0D, ChunkRetention.nearestDistance(player, 0, 0), 1e-9);
