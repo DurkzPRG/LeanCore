@@ -27,7 +27,25 @@ LeanCore fills those two gaps.
 
 ## Measured
 
-A/B on the Hytale 0.7 pre-release: solo, 3 GB heap, the same scripted flight (600 blocks out, 90s wait, back), the build before chunk retention vs 1.8.0.
+Hytale 0.7.0 release, dedicated profile (FULL), 6 GB heap. Four virtual explorers leave spawn in different directions at 20 blocks/s and generate new terrain the whole time, while a scripted player flies 600 blocks out, waits 90s and flies back. Server with no mods vs LeanCore 1.8.0, same world and route.
+
+| | no mod | LeanCore 1.8.0 |
+|---|---|---|
+| World tick, average | 19.6 ms | 13.4 ms (-32%) |
+| World tick, p95 | 44.8 ms | 35.1 ms (-22%) |
+| Worst tick | 1440 ms | 299 ms (-79%) |
+| GC pause time, total | 7.3 s | 5.0 s (-31%) |
+| Longest GC pause | 1194 ms | 201 ms (-83%) |
+| Heap after GC, p95 | 6071 MB | 4906 MB (-19%) |
+| Peak heap after GC | 99.99% of max | 83% of max |
+
+Without LeanCore the heap after GC reached 99.99% of max, past the 85% where the engine starts its own emergency unload. With it, the heap after GC peaked at 83%.
+
+The cost: view radius averaged 16 chunks instead of 24 (lowest 12). When the view comes back on the return flight, the area that was dropped loads again, so the way back read 24% more chunks from disk and its tick was 17% slower. LeanCore itself used 0.42% of the server CPU. One run per variant; your world will differ.
+
+### Solo, chunk retention
+
+Hytale 0.7 pre-release, solo, 3 GB heap, the same scripted flight, the build before chunk retention vs 1.8.0.
 
 | | before | 1.8.0 |
 |---|---|---|
@@ -63,12 +81,13 @@ Default thresholds: 70% / 82% / 90% of max heap, measured after GC. Raw heap alo
                  ▼
    engine would unload it in ~7.5s
                  │
-   COMFORT and heap after GC under 50%?  ── no ──►  engine unloads it
+   COMFORT and heap after GC under 45%?  ── no ──►  engine unloads it
                  │ yes
                  ▼
    LeanCore holds it (engine keep-loaded reference; it stops ticking)
                  │
    player walks back           ──►  already loaded, no disk read
+   heap after GC above 50%     ──►  farthest released first, 64 every 2s
    pressure, or 10 min passed  ──►  released, engine unloads it as usual
 ```
 
@@ -146,7 +165,7 @@ File: `mods/durkz_LeanCore/LeanCore.json`
 | Key | Default | Notes |
 |-----|---------|-------|
 | `chunkRetentionEnabled` | `true` | Keep recently left chunks loaded while there is spare heap |
-| `chunkRetentionMaxPostGcRatio` | `0.50` | Hold chunks only while heap after GC stays under this (always below `watchHeapRatio`) |
+| `chunkRetentionMaxPostGcRatio` | `0.50` | Ceiling for heap after GC (always below `watchHeapRatio`). New holds stop 5% under it; above it, the farthest go first, 64 every 2s |
 | `chunkRetentionMbPerChunk` | `1.0` | Heap estimate per held chunk, used for the budget |
 | `chunkRetentionMaxChunks` | `2048` | Hard cap on held chunks |
 | `chunkRetentionMaxHoldSeconds` | `600` | Release a held chunk after this long |
